@@ -1,0 +1,139 @@
+<svg width="1920" height="1080" viewBox="0 0 1920 1080" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1920" y2="1080" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#06111C"/>
+      <stop offset="0.52" stop-color="#0B1D2B"/>
+      <stop offset="1" stop-color="#103844"/>
+    </linearGradient>
+    <linearGradient id="card" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#112B42" stop-opacity="0.94"/>
+      <stop offset="1" stop-color="#091723" stop-opacity="0.98"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="10" stdDeviation="18" flood-color="#000C16" flood-opacity="0.52"/>
+    </filter>
+  </defs>
+
+  <rect width="1920" height="1080" fill="url(#bg)"/>
+  <circle cx="1510" cy="170" r="260" fill="#2CC8E8" fill-opacity="0.08"/>
+  <circle cx="190" cy="930" r="240" fill="#2BD59E" fill-opacity="0.08"/>
+
+  <rect x="48" y="36" width="1824" height="86" rx="24" fill="#0A2539" fill-opacity="0.84" stroke="#4AC7FF" stroke-opacity="0.22"/>
+  <image href="hota-logo.png" x="74" y="42" width="150" height="94" preserveAspectRatio="xMidYMid meet"/>
+  <text x="258" y="84" fill="#F0FBFF" font-size="38" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-weight="700">生产排程与产线仿真</text>
+  <text x="258" y="114" fill="#92D0E5" font-size="20" font-family="Microsoft YaHei, Segoe UI, sans-serif">未完工订单未来 30 日排产展示 · 产线分组 · 自动滚动</text>
+  <text x="1760" y="86" text-anchor="end" fill="#F0FBFF" font-size="24" font-family="Microsoft YaHei, Segoe UI, sans-serif">右屏展示</text>
+  <text x="1760" y="114" text-anchor="end" fill="#7FD2CD" font-size="18" font-family="Microsoft YaHei, Segoe UI, sans-serif">自动轮播 / 每页 60 秒</text>
+
+  <rect x="48" y="150" width="1278" height="882" rx="30" fill="url(#card)" filter="url(#shadow)" stroke="#54DAE6" stroke-opacity="0.22"/>
+  <text x="84" y="198" fill="#DAF8FF" font-size="30" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-weight="700">未完工订单排产甘特图</text>
+  <text x="84" y="234" fill="#8FCBDE" font-size="18" font-family="Microsoft YaHei, Segoe UI, sans-serif">X 轴按日期展示，Y 轴按产线分组；仅展示今日起未来 30 日可见排产</text>
+
+  <rect x="84" y="258" width="214" height="730" rx="20" fill="#0E2436" stroke="#3BB9EA" stroke-opacity="0.22"/>
+  <text x="118" y="302" fill="#99D9E8" font-size="20" font-family="Microsoft YaHei, Segoe UI, sans-serif">产线 / 订单</text>
+
+  <rect x="316" y="258" width="970" height="730" rx="20" fill="#0A1D2B" stroke="#3BB9EA" stroke-opacity="0.16"/>
+  <line x1="316" y1="326" x2="1286" y2="326" stroke="#355A6E" stroke-width="2"/>
+  <line x1="316" y1="430" x2="1286" y2="430" stroke="#20394A" stroke-width="1"/>
+  <line x1="316" y1="534" x2="1286" y2="534" stroke="#20394A" stroke-width="1"/>
+  <line x1="316" y1="638" x2="1286" y2="638" stroke="#20394A" stroke-width="1"/>
+  <line x1="316" y1="742" x2="1286" y2="742" stroke="#20394A" stroke-width="1"/>
+  <line x1="316" y1="846" x2="1286" y2="846" stroke="#20394A" stroke-width="1"/>
+
+  <line x1="430" y1="286" x2="430" y2="954" stroke="#26485A" stroke-width="1"/>
+  <line x1="570" y1="286" x2="570" y2="954" stroke="#26485A" stroke-width="1"/>
+  <line x1="710" y1="286" x2="710" y2="954" stroke="#26485A" stroke-width="1"/>
+  <line x1="850" y1="286" x2="850" y2="954" stroke="#26485A" stroke-width="1"/>
+  <line x1="990" y1="286" x2="990" y2="954" stroke="#26485A" stroke-width="1"/>
+  <line x1="1130" y1="286" x2="1130" y2="954" stroke="#26485A" stroke-width="1"/>
+
+  <text x="352" y="308" fill="#7DB6C9" font-size="16" font-family="Microsoft YaHei, Segoe UI, sans-serif">04-09</text>
+  <text x="492" y="308" fill="#7DB6C9" font-size="16" font-family="Microsoft YaHei, Segoe UI, sans-serif">04-14</text>
+  <text x="632" y="308" fill="#7DB6C9" font-size="16" font-family="Microsoft YaHei, Segoe UI, sans-serif">04-19</text>
+  <text x="772" y="308" fill="#7DB6C9" font-size="16" font-family="Microsoft YaHei, Segoe UI, sans-serif">04-24</text>
+  <text x="912" y="308" fill="#7DB6C9" font-size="16" font-family="Microsoft YaHei, Segoe UI, sans-serif">04-29</text>
+  <text x="1052" y="308" fill="#7DB6C9" font-size="16" font-family="Microsoft YaHei, Segoe UI, sans-serif">05-04</text>
+  <text x="1192" y="308" fill="#7DB6C9" font-size="16" font-family="Microsoft YaHei, Segoe UI, sans-serif">05-09</text>
+
+  <text x="118" y="372" fill="#B7E7F9" font-size="24" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-weight="700">A 线</text>
+  <text x="118" y="416" fill="#8BC4D7" font-size="18" font-family="Microsoft YaHei, Segoe UI, sans-serif">HOTA-240801</text>
+  <text x="118" y="452" fill="#8BC4D7" font-size="18" font-family="Microsoft YaHei, Segoe UI, sans-serif">HOTA-240808</text>
+
+  <text x="118" y="476" fill="#B7E7F9" font-size="24" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-weight="700">B 线</text>
+  <text x="118" y="520" fill="#8BC4D7" font-size="18" font-family="Microsoft YaHei, Segoe UI, sans-serif">HOTA-240805</text>
+  <text x="118" y="556" fill="#8BC4D7" font-size="18" font-family="Microsoft YaHei, Segoe UI, sans-serif">HOTA-240811</text>
+
+  <text x="118" y="580" fill="#B7E7F9" font-size="24" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-weight="700">C 线</text>
+  <text x="118" y="624" fill="#8BC4D7" font-size="18" font-family="Microsoft YaHei, Segoe UI, sans-serif">HOTA-240809</text>
+  <text x="118" y="660" fill="#8BC4D7" font-size="18" font-family="Microsoft YaHei, Segoe UI, sans-serif">HOTA-240815</text>
+
+  <text x="118" y="684" fill="#B7E7F9" font-size="24" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-weight="700">D 线</text>
+  <text x="118" y="728" fill="#8BC4D7" font-size="18" font-family="Microsoft YaHei, Segoe UI, sans-serif">HOTA-240820</text>
+  <text x="118" y="764" fill="#8BC4D7" font-size="18" font-family="Microsoft YaHei, Segoe UI, sans-serif">HOTA-240826</text>
+
+  <rect x="364" y="392" width="298" height="26" rx="13" fill="#22D49B"/>
+  <text x="380" y="410" fill="#083140" font-size="14" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-weight="700">进行中 / MAT-1102 / 预计正常</text>
+  <rect x="682" y="428" width="246" height="26" rx="13" fill="#45BFFF"/>
+  <text x="698" y="446" fill="#062B49" font-size="14" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-weight="700">未开工 / MAT-1136</text>
+
+  <rect x="430" y="496" width="336" height="26" rx="13" fill="#F15156"/>
+  <text x="446" y="514" fill="#FFF3F3" font-size="14" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-weight="700">已延期 / MAT-1148 / 整单标红</text>
+  <rect x="794" y="532" width="206" height="26" rx="13" fill="#F2A249"/>
+  <text x="810" y="550" fill="#442506" font-size="14" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-weight="700">暂停 / MAT-1155</text>
+
+  <rect x="514" y="600" width="372" height="26" rx="13" fill="#22D49B"/>
+  <text x="530" y="618" fill="#083140" font-size="14" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-weight="700">进行中 / MAT-1201 / 预计 4 月 26 日完工</text>
+  <rect x="914" y="636" width="274" height="26" rx="13" fill="#45BFFF"/>
+  <text x="930" y="654" fill="#062B49" font-size="14" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-weight="700">未开工 / MAT-1210</text>
+
+  <rect x="626" y="704" width="260" height="26" rx="13" fill="#22D49B"/>
+  <text x="642" y="722" fill="#083140" font-size="14" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-weight="700">进行中 / MAT-1228</text>
+  <rect x="914" y="740" width="318" height="26" rx="13" fill="#45BFFF"/>
+  <text x="930" y="758" fill="#062B49" font-size="14" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-weight="700">未开工 / MAT-1240 / 可见区截取</text>
+
+  <rect x="354" y="912" width="892" height="40" rx="20" fill="#0E2436" stroke="#3BB9EA" stroke-opacity="0.18"/>
+  <text x="386" y="938" fill="#8FD0E4" font-size="18" font-family="Microsoft YaHei, Segoe UI, sans-serif">滚动说明：订单过多时按固定节奏自动向下滚动；同一产线内默认按计划开始日期升序展示</text>
+
+  <rect x="1350" y="150" width="522" height="396" rx="30" fill="url(#card)" filter="url(#shadow)" stroke="#54DAE6" stroke-opacity="0.22"/>
+  <text x="1386" y="198" fill="#DAF8FF" font-size="30" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-weight="700">状态说明与风险提示</text>
+  <text x="1386" y="234" fill="#8FCBDE" font-size="18" font-family="Microsoft YaHei, Segoe UI, sans-serif">未开工不计算延期；已开工订单按有效产能预测是否会延期</text>
+
+  <rect x="1386" y="276" width="24" height="24" rx="12" fill="#22D49B"/>
+  <text x="1428" y="294" fill="#F4FBFF" font-size="20" font-family="Microsoft YaHei, Segoe UI, sans-serif">进行中 / 正常</text>
+  <rect x="1386" y="316" width="24" height="24" rx="12" fill="#45BFFF"/>
+  <text x="1428" y="334" fill="#F4FBFF" font-size="20" font-family="Microsoft YaHei, Segoe UI, sans-serif">未开工 / 仅显示计划</text>
+  <rect x="1386" y="356" width="24" height="24" rx="12" fill="#F2A249"/>
+  <text x="1428" y="374" fill="#F4FBFF" font-size="20" font-family="Microsoft YaHei, Segoe UI, sans-serif">暂停 / 需重点关注</text>
+  <rect x="1386" y="396" width="24" height="24" rx="12" fill="#F15156"/>
+  <text x="1428" y="414" fill="#F4FBFF" font-size="20" font-family="Microsoft YaHei, Segoe UI, sans-serif">已延期 / 整单标红</text>
+
+  <rect x="1386" y="452" width="450" height="58" rx="20" fill="#0E2436" stroke="#F15156" stroke-opacity="0.34"/>
+  <text x="1414" y="487" fill="#FFF2F2" font-size="20" font-family="Microsoft YaHei, Segoe UI, sans-serif">风险订单：B 线 HOTA-240805 / MAT-1148</text>
+  <text x="1414" y="520" fill="#F4C5C5" font-size="16" font-family="Microsoft YaHei, Segoe UI, sans-serif">预计完工时间晚于计划完工时间，建议重点展示</text>
+
+  <rect x="1350" y="574" width="522" height="458" rx="30" fill="url(#card)" filter="url(#shadow)" stroke="#54DAE6" stroke-opacity="0.22"/>
+  <text x="1386" y="622" fill="#DAF8FF" font-size="30" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-weight="700">3D 设备仿真</text>
+  <text x="1386" y="658" fill="#8FCBDE" font-size="18" font-family="Microsoft YaHei, Segoe UI, sans-serif">右下角预留三维设备或产线模型展示区</text>
+
+  <rect x="1396" y="730" width="92" height="72" rx="20" fill="#0E2C41" stroke="#2DE09E" stroke-width="3"/>
+  <text x="1442" y="773" text-anchor="middle" fill="#F0FBFF" font-size="18" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-weight="700">上料</text>
+  <rect x="1512" y="730" width="92" height="72" rx="20" fill="#0E2C41" stroke="#4ABEFF" stroke-width="3"/>
+  <text x="1558" y="773" text-anchor="middle" fill="#F0FBFF" font-size="18" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-weight="700">机加</text>
+  <rect x="1628" y="730" width="92" height="72" rx="20" fill="#0E2C41" stroke="#F2A249" stroke-width="3"/>
+  <text x="1674" y="773" text-anchor="middle" fill="#F0FBFF" font-size="18" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-weight="700">热处</text>
+  <rect x="1744" y="730" width="92" height="72" rx="20" fill="#0E2C41" stroke="#2DE09E" stroke-width="3"/>
+  <text x="1790" y="773" text-anchor="middle" fill="#F0FBFF" font-size="18" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-weight="700">装配</text>
+
+  <line x1="1488" y1="766" x2="1512" y2="766" stroke="#5BC9FF" stroke-width="6" stroke-dasharray="12 12"/>
+  <line x1="1604" y1="766" x2="1628" y2="766" stroke="#5BC9FF" stroke-width="6" stroke-dasharray="12 12"/>
+  <line x1="1720" y1="766" x2="1744" y2="766" stroke="#5BC9FF" stroke-width="6" stroke-dasharray="12 12"/>
+
+  <circle cx="1500" cy="766" r="12" fill="#DFF9FF"/>
+  <circle cx="1616" cy="766" r="12" fill="#DFF9FF"/>
+  <circle cx="1732" cy="766" r="12" fill="#DFF9FF"/>
+
+  <rect x="1396" y="840" width="440" height="126" rx="24" fill="#0D2436" stroke="#3BB9EA" stroke-opacity="0.22"/>
+  <text x="1424" y="884" fill="#97D6E4" font-size="20" font-family="Microsoft YaHei, Segoe UI, sans-serif">实施说明</text>
+  <text x="1424" y="926" fill="#F1FBFF" font-size="24" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-weight="700">可展示设备模型、产线流转、关键工艺节点</text>
+  <text x="1424" y="956" fill="#8ABFD2" font-size="16" font-family="Microsoft YaHei, Segoe UI, sans-serif">一期后段实施，优先级低于报修系统接入</text>
+</svg>
