@@ -192,6 +192,10 @@ class CodeMapping(ReservedFieldsMixin, TimestampedModel):
 
 
 class ScreenConfig(ReservedFieldsMixin, TimestampedModel):
+    """
+    屏幕级配置：标题、轮播时长、模块/主题开关及该屏的子页面轮播顺序（page_order）。
+    每个子页面的具体数据源绑定请在 ScreenPageBinding 维护。
+    """
     SCREEN_CHOICES = [("left", "左屏"), ("right", "右屏")]
 
     area = models.ForeignKey(
@@ -205,7 +209,11 @@ class ScreenConfig(ReservedFieldsMixin, TimestampedModel):
     title = models.CharField(max_length=128)
     subtitle = models.CharField(max_length=255, blank=True)
     rotation_interval_seconds = models.PositiveIntegerField(default=60)
-    page_keys = models.JSONField(default=list, blank=True)
+    page_order = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="该屏轮播的子页面键顺序，如 [\"overview\", \"realtime\"]；空列表时使用全局默认顺序",
+    )
     module_settings = models.JSONField(default=dict, blank=True)
     theme_settings = models.JSONField(default=dict, blank=True)
     is_active = models.BooleanField(default=True)
@@ -408,9 +416,6 @@ class DataSourceConfig(ReservedFieldsMixin, TimestampedModel):
         ("modbus_tcp", "Modbus TCP"),
         ("sap_rfc", "SAP RFC"),
         ("database", "数据库"),
-        ("schedule_db", "排产数据库"),
-        ("energy_db", "能耗数据库"),
-        ("wms", "WMS数据库"),
         ("repair", "报修系统"),
         ("custom", "自定义"),
     ]
@@ -543,8 +548,11 @@ class Order(ReservedFieldsMixin, TimestampedModel):
         return self.order_no
 
 
+SCREEN_KEY_CHOICES = [("left", "左屏"), ("right", "右屏")]
+
+
 class PageModuleSwitch(ReservedFieldsMixin, TimestampedModel):
-    SCREEN_CHOICES = [("left", "左屏"), ("right", "右屏")]
+    SCREEN_CHOICES = SCREEN_KEY_CHOICES
 
     screen_key = models.CharField(max_length=16, choices=SCREEN_CHOICES)
     module_key = models.CharField(max_length=64)
@@ -564,6 +572,38 @@ class PageModuleSwitch(ReservedFieldsMixin, TimestampedModel):
 
     def __str__(self):
         return f"{self.screen_key}:{self.module_key}"
+
+
+class ScreenPageBinding(ReservedFieldsMixin, TimestampedModel):
+    """
+    全局子页面数据源绑定：每条记录对应一个页面键（如 realtime），记录其所属屏幕及数据源配置。
+    轮播顺序由 ScreenConfig.page_order 控制；区域维度已移除，数据源配置全局共享。
+    binding_source_type + data_source_ids 描述接入的数据源（先选类型再选具体数据源）。
+    """
+
+    screen_key = models.CharField(max_length=16, choices=SCREEN_KEY_CHOICES)
+    page_key = models.CharField(max_length=64)
+    binding_source_type = models.CharField(
+        max_length=32,
+        blank=True,
+        default="",
+        help_text="与 DataSourceConfig.source_type 对齐；表单先选类型再筛选具体数据源",
+    )
+    data_source_ids = models.JSONField(default=list, blank=True)
+    is_enabled = models.BooleanField(default=True)
+    notes = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["screen_key", "page_key"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["screen_key", "page_key"],
+                name="uniq_screen_page_binding_screen_page",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.screen_key}:{self.page_key}"
 
 
 class OperationLog(models.Model):

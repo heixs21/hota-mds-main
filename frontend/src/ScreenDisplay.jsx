@@ -2,8 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_PAGE_KEYS = {
-  left: ["overview"],
-  right: ["schedule"],
+  left: ["overview", "operations", "energy", "realtime"],
+  right: ["schedule", "risk", "simulation"],
 };
 const PAGE_PRESETS = {
   left: {
@@ -19,8 +19,8 @@ const PAGE_PRESETS = {
     },
     energy: {
       key: "energy",
-      label: "能耗与占位",
-      sections: ["energyOverview", "repairPlaceholder", "deviceOverview"],
+      label: "能耗数据",
+      sections: ["energyData"],
     },
     realtime: {
       key: "realtime",
@@ -43,6 +43,16 @@ const PAGE_PRESETS = {
       key: "simulation",
       label: "仿真预留",
       sections: ["simulationPlaceholder", "delayLegend"],
+    },
+    realtime: {
+      key: "realtime",
+      label: "设备实时监控",
+      sections: ["deviceRealtimeMonitor"],
+    },
+    energy: {
+      key: "energy",
+      label: "能耗数据",
+      sections: ["energyData"],
     },
   },
 };
@@ -942,115 +952,19 @@ function LeftScreen({ payload, errorMessage, fullscreenState, screenRef }) {
       </section>
     ),
     deviceRealtimeMonitor: (
-      <section className="screen-panel panel-span-12 panel-unbounded industrial-realtime-panel" key="deviceRealtimeMonitor">
-        <header className="industrial-realtime-header">
-          <div className="industrial-realtime-header-left">
-            <h2>设备实时监控</h2>
-            <span className="industrial-realtime-poll">{`轮询 ${drm.pollIntervalSeconds ?? 30}s`}</span>
-          </div>
-          <time className="industrial-realtime-clock" dateTime={clock.toISOString()}>
-            {formatDateTime(clock)}
-          </time>
-        </header>
-        <div className="industrial-realtime-grid">
-          {(drm.cards ?? []).map((card) => {
-            const borderKey = card.machineStatus?.borderColor ?? "gray";
-            const pulseOn =
-              Boolean(card.machineStatus?.alarmActive) && !alarmPulseDismissed.has(card.sourceCode);
-            const spindles = Array.isArray(card.spindles) ? card.spindles : [];
-            const job = card.job ?? {};
-            const mergeLayout = Boolean(card.mergeLayout && card.robot);
-            const cncOffline = mergeLayout ? card.cncSourceStatus !== "online" : card.status !== "online";
-            const robotOffline = mergeLayout ? card.robotSourceStatus !== "online" : true;
-
-            return (
-              <article
-                className={`cnc-device-card cnc-device-card--border-${borderKey} ${pulseOn ? "cnc-device-card--pulse" : ""}`}
-                key={card.sourceCode}
-                onClick={() => {
-                  if (card.machineStatus?.alarmActive) {
-                    setAlarmPulseDismissed((prev) => new Set(prev).add(card.sourceCode));
-                  }
-                }}
-              >
-                {card.machineStatus?.alarmActive ? (
-                  <span className="cnc-alarm-icon" title="报警" aria-hidden="true">
-                    !
-                  </span>
-                ) : null}
-                <div className="cnc-device-head">
-                  <div className="cnc-device-head-text">
-                    <h3 className="cnc-device-title">{card.displayTitle || card.deviceName || card.sourceName}</h3>
-                    {card.subtitle ? <div className="cnc-device-subtitle">{card.subtitle}</div> : null}
-                    <div className="cnc-device-model">{`型号 ${card.deviceModel ?? "--"}`}</div>
-                  </div>
-                  <div className="cnc-device-status">
-                    <span className={`cnc-status-dot cnc-status-dot--${card.machineStatus?.indicator ?? "gray"}`} />
-                    <span className="cnc-status-label">{card.machineStatus?.label ?? "--"}</span>
-                  </div>
-                </div>
-
-                {card.status !== "online" ? (
-                  <div className="cnc-device-offline-strip">{card.offlineReason || "连接超时或无法建立连接"}</div>
-                ) : null}
-
-                {mergeLayout ? (
-                  <div className="cnc-machine-split">
-                    <div className="cnc-machine-split-col">
-                      <RealtimeSpindleColumn
-                        deviceOffline={cncOffline}
-                        slot={spindles[0] ?? { label: "主轴", configured: false }}
-                      />
-                    </div>
-                    <div className="cnc-machine-split-vrule" aria-hidden="true" />
-                    <div className="cnc-machine-split-col">
-                      <RealtimeRobotColumn deviceOffline={robotOffline} robot={card.robot} />
-                    </div>
-                  </div>
-                ) : (
-                  <div className="cnc-spindle-row">
-                    <RealtimeSpindleColumn
-                      deviceOffline={card.status !== "online"}
-                      slot={spindles[0] ?? { label: "主轴", configured: false }}
-                    />
-                  </div>
-                )}
-
-                <footer className="cnc-job-footer">
-                  <div className="cnc-job-program-row">
-                    <span className="cnc-job-k">当前程序</span>
-                    <span className="cnc-job-main">{job.mainProgram ?? "--"}</span>
-                    <span className="cnc-job-sep">·</span>
-                    <span className="cnc-job-k">行号</span>
-                    <span className="cnc-job-line">{job.exeLine ?? "--"}</span>
-                  </div>
-                  <div className="cnc-job-times">
-                    <div className="cnc-job-time-pill" title="累计有效切削时间">
-                      <span>切削</span>
-                      <strong>{job.cycleTimeFormatted ?? "--"}</strong>
-                    </div>
-                    <div className="cnc-job-time-pill" title="程序运行时长">
-                      <span>程序</span>
-                      <strong>{job.operationTimeFormatted ?? "--"}</strong>
-                    </div>
-                    <span className={`cnc-mode-tag cnc-mode-tag--${String(job.workModeTag ?? "").toLowerCase()}`}>
-                      {job.workModeTag ?? "--"}
-                    </span>
-                  </div>
-                </footer>
-                <div className="cnc-device-foot-meta">{`更新 ${formatDateTime(card.updatedAt)}`}</div>
-              </article>
-            );
-          })}
-          {(drm.cards ?? []).length === 0 ? (
-            <SectionEmpty title="当前暂无可监控 OPC UA 设备" description="请在数据源配置中绑定设备并配置节点列表（含 TK.MD 数据点）。" />
-          ) : null}
-        </div>
-      </section>
+      <DeviceRealtimeSection
+        key="deviceRealtimeMonitor"
+        drm={drm}
+        clock={clock}
+        alarmPulseDismissed={alarmPulseDismissed}
+        setAlarmPulseDismissed={setAlarmPulseDismissed}
+      />
     ),
+    energyData: <EnergyDataSection key="energyData" energyData={content.energyData ?? {}} />,
   };
 
   const isRealtimeOnlyPage = visibleSections.length === 1 && visibleSections[0] === "deviceRealtimeMonitor";
+  const isEnergyOnlyPage = visibleSections.length === 1 && visibleSections[0] === "energyData";
 
   return (
     <main className="screen-shell screen-left" onDoubleClick={fullscreenState.toggleFullscreen} ref={screenRef}>
@@ -1074,7 +988,7 @@ function LeftScreen({ payload, errorMessage, fullscreenState, screenRef }) {
         welcome={welcome}
       />
 
-      <section className={`screen-page screen-grid screen-grid-left${isRealtimeOnlyPage ? " screen-grid-left-realtime" : ""}`}>
+      <section className={`screen-page screen-grid screen-grid-left${isRealtimeOnlyPage ? " screen-grid-left-realtime" : ""}${isEnergyOnlyPage ? " screen-grid-energy" : ""}`}>
         {visibleSections.length > 0 ? (
           visibleSections.map((sectionKey) => sectionNodes[sectionKey]).filter(Boolean)
         ) : (
@@ -1087,6 +1001,197 @@ function LeftScreen({ payload, errorMessage, fullscreenState, screenRef }) {
         )}
       </section>
     </main>
+  );
+}
+
+function DeviceRealtimeSection({ drm, clock, alarmPulseDismissed, setAlarmPulseDismissed }) {
+  return (
+    <section className="screen-panel panel-span-12 panel-unbounded industrial-realtime-panel" key="deviceRealtimeMonitor">
+      <header className="industrial-realtime-header">
+        <div className="industrial-realtime-header-left">
+          <h2>设备实时监控</h2>
+          <span className="industrial-realtime-poll">{`轮询 ${drm.pollIntervalSeconds ?? 30}s`}</span>
+        </div>
+        <time className="industrial-realtime-clock" dateTime={clock.toISOString()}>
+          {formatDateTime(clock)}
+        </time>
+      </header>
+      <div className="industrial-realtime-grid">
+        {(drm.cards ?? []).map((card) => {
+          const borderKey = card.machineStatus?.borderColor ?? "gray";
+          const pulseOn = Boolean(card.machineStatus?.alarmActive) && !alarmPulseDismissed.has(card.sourceCode);
+          const spindles = Array.isArray(card.spindles) ? card.spindles : [];
+          const job = card.job ?? {};
+          const mergeLayout = Boolean(card.mergeLayout && card.robot);
+          const cncOffline = mergeLayout ? card.cncSourceStatus !== "online" : card.status !== "online";
+          const robotOffline = mergeLayout ? card.robotSourceStatus !== "online" : true;
+          return (
+            <article
+              className={`cnc-device-card cnc-device-card--border-${borderKey} ${pulseOn ? "cnc-device-card--pulse" : ""}`}
+              key={card.sourceCode}
+              onClick={() => {
+                if (card.machineStatus?.alarmActive) {
+                  setAlarmPulseDismissed((prev) => new Set(prev).add(card.sourceCode));
+                }
+              }}
+            >
+              {card.machineStatus?.alarmActive ? (
+                <span className="cnc-alarm-icon" title="报警" aria-hidden="true">!</span>
+              ) : null}
+              <div className="cnc-device-head">
+                <div className="cnc-device-head-text">
+                  <h3 className="cnc-device-title">{card.displayTitle || card.deviceName || card.sourceName}</h3>
+                  {card.subtitle ? <div className="cnc-device-subtitle">{card.subtitle}</div> : null}
+                  <div className="cnc-device-model">{`型号 ${card.deviceModel ?? "--"}`}</div>
+                </div>
+                <div className="cnc-device-status">
+                  <span className={`cnc-status-dot cnc-status-dot--${card.machineStatus?.indicator ?? "gray"}`} />
+                  <span className="cnc-status-label">{card.machineStatus?.label ?? "--"}</span>
+                </div>
+              </div>
+              {card.status !== "online" ? (
+                <div className="cnc-device-offline-strip">{card.offlineReason || "连接超时或无法建立连接"}</div>
+              ) : null}
+              {mergeLayout ? (
+                <div className="cnc-machine-split">
+                  <div className="cnc-machine-split-col">
+                    <RealtimeSpindleColumn deviceOffline={cncOffline} slot={spindles[0] ?? { label: "主轴", configured: false }} />
+                  </div>
+                  <div className="cnc-machine-split-vrule" aria-hidden="true" />
+                  <div className="cnc-machine-split-col">
+                    <RealtimeRobotColumn deviceOffline={robotOffline} robot={card.robot} />
+                  </div>
+                </div>
+              ) : (
+                <div className="cnc-spindle-row">
+                  <RealtimeSpindleColumn deviceOffline={card.status !== "online"} slot={spindles[0] ?? { label: "主轴", configured: false }} />
+                </div>
+              )}
+              <footer className="cnc-job-footer">
+                <div className="cnc-job-program-row">
+                  <span className="cnc-job-k">当前程序</span>
+                  <span className="cnc-job-main">{job.mainProgram ?? "--"}</span>
+                  <span className="cnc-job-sep">·</span>
+                  <span className="cnc-job-k">行号</span>
+                  <span className="cnc-job-line">{job.exeLine ?? "--"}</span>
+                </div>
+                <div className="cnc-job-times">
+                  <div className="cnc-job-time-pill" title="累计有效切削时间">
+                    <span>切削</span>
+                    <strong>{job.cycleTimeFormatted ?? "--"}</strong>
+                  </div>
+                  <div className="cnc-job-time-pill" title="程序运行时长">
+                    <span>程序</span>
+                    <strong>{job.operationTimeFormatted ?? "--"}</strong>
+                  </div>
+                  <span className={`cnc-mode-tag cnc-mode-tag--${String(job.workModeTag ?? "").toLowerCase()}`}>
+                    {job.workModeTag ?? "--"}
+                  </span>
+                </div>
+              </footer>
+              <div className="cnc-device-foot-meta">{`更新 ${formatDateTime(card.updatedAt)}`}</div>
+            </article>
+          );
+        })}
+        {(drm.cards ?? []).length === 0 ? (
+          <SectionEmpty title="当前暂无可监控 OPC UA 设备" description="请在数据源配置中绑定设备并配置节点列表（含 TK.MD 数据点）。" />
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
+function EnergyDataSection({ energyData }) {
+  const equipmentList = energyData.equipmentList ?? [];
+  const categories = energyData.categories ?? [];
+  const equipScrollRef = useRef(null);
+  const equipScrollActive = equipmentList.length > 0;
+  const equipOverflowing = useOverflowAutoScroll(equipScrollRef, equipScrollActive);
+
+  const formatKwh = (val) => {
+    const n = parseFloat(val);
+    if (isNaN(n)) return "—";
+    if (n >= 10000) return `${(n / 10000).toFixed(2)} 万kWh`;
+    return `${n.toFixed(2)} kWh`;
+  };
+
+  return (
+    <section className="screen-panel panel-span-12 panel-unbounded energy-data-panel" key="energyData">
+      <header className="energy-data-header">
+        <div className="energy-data-header-left">
+          <h2>能耗数据</h2>
+          {energyData.sourceName && <span className="energy-data-source">{energyData.sourceName}</span>}
+        </div>
+        <div className="energy-data-header-kpi">
+          <div className="energy-kpi-card">
+            <span className="energy-kpi-label">今日用电量</span>
+            <strong className="energy-kpi-value accent-teal">{formatKwh(energyData.todayKwh)}</strong>
+          </div>
+          <div className="energy-kpi-card">
+            <span className="energy-kpi-label">本月用电量</span>
+            <strong className="energy-kpi-value accent-blue">{formatKwh(energyData.monthKwh)}</strong>
+          </div>
+        </div>
+      </header>
+
+      {energyData.errorMessage && (
+        <div className="energy-data-error">{energyData.errorMessage}</div>
+      )}
+
+      <div className="energy-data-body">
+        {categories.length > 0 && (
+          <div className="energy-category-block">
+            <h3 className="energy-block-title">分类能耗占比（今日）</h3>
+            <div className="energy-category-list">
+              {categories.map((cat) => (
+                <div className="energy-category-row" key={cat.id}>
+                  <div className="energy-category-meta">
+                    <span className="energy-category-dot" style={{ background: cat.color }} />
+                    <span className="energy-category-name">{cat.label}</span>
+                    <span className="energy-category-kwh">{formatKwh(cat.kwh)}</span>
+                  </div>
+                  <div className="energy-category-bar-track">
+                    <div
+                      className="energy-category-bar-fill"
+                      style={{ width: `${cat.percent}%`, background: cat.color }}
+                    />
+                  </div>
+                  <span className="energy-category-pct">{cat.percent}%</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="energy-equipment-block">
+          <h3 className="energy-block-title">
+            设备用电明细（今日）
+            <span className="energy-block-subtitle">
+              {`${equipmentList.length} 条记录`}
+              {equipOverflowing ? " · 自动滚动中" : ""}
+            </span>
+          </h3>
+          {equipmentList.length > 0 ? (
+            <div className="energy-equipment-list" ref={equipScrollRef}>
+              {equipmentList.map((eq, i) => (
+                <article className="energy-equipment-item" key={eq.equipmentCode || i}>
+                  <div className="energy-equipment-name">{eq.equipmentName}</div>
+                  <div className="energy-equipment-meta">
+                    <span className="energy-equipment-category">{eq.category}</span>
+                    <span className="energy-equipment-collection">{eq.collectionName}</span>
+                  </div>
+                  <div className="energy-equipment-kwh">{formatKwh(eq.todayKwh)}</div>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <div className="energy-equipment-empty">
+              {energyData.errorMessage ? "数据源异常，暂无记录" : "今日暂无用电记录"}
+            </div>
+          )}
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -1242,7 +1347,35 @@ function RightScreen({ payload, errorMessage, fullscreenState, screenRef }) {
   const simulationScrollActive = visibleSections.includes("simulationPlaceholder");
   const simulationOverflowing = useOverflowAutoScroll(simulationScrollRef, simulationScrollActive);
 
+  const isRealtimeOnlyPage = visibleSections.length === 1 && visibleSections[0] === "deviceRealtimeMonitor";
+  const isEnergyOnlyPage = visibleSections.length === 1 && visibleSections[0] === "energyData";
+
+  const drm = content.deviceRealtimeMonitor ?? {};
+  const [alarmPulseDismissed, setAlarmPulseDismissed] = useState(() => new Set());
+  useEffect(() => {
+    const cards = content.deviceRealtimeMonitor?.cards ?? [];
+    setAlarmPulseDismissed((prev) => {
+      const next = new Set();
+      for (const code of prev) {
+        const card = cards.find((c) => c.sourceCode === code);
+        if (card?.machineStatus?.alarmActive) {
+          next.add(code);
+        }
+      }
+      return next;
+    });
+  }, [content.deviceRealtimeMonitor]);
+
   const sectionNodes = {
+    deviceRealtimeMonitor: (
+      <DeviceRealtimeSection
+        key="deviceRealtimeMonitor"
+        drm={drm}
+        clock={clock}
+        alarmPulseDismissed={alarmPulseDismissed}
+        setAlarmPulseDismissed={setAlarmPulseDismissed}
+      />
+    ),
     schedule: (
       <section className="screen-panel panel-span-8 schedule-panel" key="schedule">
         <div className="panel-header">
@@ -1277,6 +1410,7 @@ function RightScreen({ payload, errorMessage, fullscreenState, screenRef }) {
         </div>
       </section>
     ),
+    energyData: <EnergyDataSection key="energyData" energyData={content.energyData ?? {}} />,
   };
 
   return (
@@ -1301,7 +1435,7 @@ function RightScreen({ payload, errorMessage, fullscreenState, screenRef }) {
         welcome={welcome}
       />
 
-      <section className="screen-page screen-grid screen-grid-right">
+      <section className={`screen-page screen-grid screen-grid-right${isRealtimeOnlyPage ? " screen-grid-realtime" : ""}${isEnergyOnlyPage ? " screen-grid-energy" : ""}`}>
         {visibleSections.length > 0 ? (
           visibleSections.map((sectionKey) => sectionNodes[sectionKey]).filter(Boolean)
         ) : (

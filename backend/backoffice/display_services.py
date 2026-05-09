@@ -25,6 +25,7 @@ from .models import (
     RuntimeParameterConfig,
     ScheduleSnapshot,
     ScreenConfig,
+    ScreenPageBinding,
 )
 from .connection_test_services import read_opcua_nodes, test_database_connection, test_opcua_connection
 from .serializers import (
@@ -53,7 +54,7 @@ DEFAULT_SCREEN_CONFIGS = {
         "title": "左屏综合运行展示",
         "subtitle": "外部参观综合运行视图",
         "rotationIntervalSeconds": 60,
-        "pageKeys": ["overview"],
+        "pageKeys": ["overview", "operations", "energy", "realtime"],
         "moduleSettings": {
             "deviceOverview": True,
             "productionOverview": True,
@@ -70,7 +71,7 @@ DEFAULT_SCREEN_CONFIGS = {
         "title": "右屏生产动态展示",
         "subtitle": "外部参观生产动态视图",
         "rotationIntervalSeconds": 60,
-        "pageKeys": ["schedule"],
+        "pageKeys": ["schedule", "risk", "simulation"],
         "moduleSettings": {
             "schedule": True,
             "delayLegend": True,
@@ -219,7 +220,6 @@ def get_screen_payload(screen_key: str, area_code: str | None = None) -> dict:
                     "description": "当前阶段仅保留展示位置，不作为一期前段阻塞项。",
                     "enabled": bool(screen_config["moduleSettings"].get("repairPlaceholder", True)),
                 },
-                "deviceRealtimeMonitor": _build_device_realtime_monitor(area),
             }
         )
     else:
@@ -246,6 +246,19 @@ def get_screen_payload(screen_key: str, area_code: str | None = None) -> dict:
                     "enabled": bool(screen_config["moduleSettings"].get("simulationPlaceholder", True)),
                 },
             }
+        )
+
+    # 无论左右屏，只要 realtime 页面在轮播列表中就构建实时监控数据
+    if "realtime" in screen_config.get("pageKeys", []):
+        payload["content"]["deviceRealtimeMonitor"] = _build_device_realtime_monitor(
+            area,
+            data_source_ids=_page_binding_data_source_ids(screen_config, "realtime"),
+        )
+
+    # 能耗数据页面
+    if "energy" in screen_config.get("pageKeys", []):
+        payload["content"]["energyData"] = _build_energy_data_page(
+            data_source_ids=_page_binding_data_source_ids(screen_config, "energy"),
         )
 
     return payload
@@ -600,6 +613,41 @@ def _resolve_area(area_code: str | None):
     return area
 
 
+def _apply_screen_page_bindings(base: dict, config: "ScreenConfig | None") -> dict:
+    """
+    大屏输出的 pageKeys / pageBindings 生成逻辑：
+    1. 页面顺序：取 ScreenConfig.page_order（若非空）；否则回退 DEFAULT_SCREEN_CONFIGS 内置顺序。
+    2. 数据源配置：从全局 ScreenPageBinding 按 screen_key + page_key 查询（不区分区域）。
+    3. 仅将启用的绑定行插入 pageBindings；未启用的页面仍在 pageKeys 中（由前端渲染空壳）。
+    """
+    screen_key = base.get("screenKey")
+    if not screen_key:
+        raise ValueError("screenKey is required in screen config dict")
+
+    # 确定轮播顺序
+    page_order = (config.page_order if config else None) or []
+    if not page_order:
+        defaults = DEFAULT_SCREEN_CONFIGS.get(screen_key) or DEFAULT_SCREEN_CONFIGS["left"]
+        page_order = list(defaults["pageKeys"])
+
+    # 全局数据源配置（不过滤 area）
+    bindings_qs = ScreenPageBinding.objects.filter(screen_key=screen_key, is_enabled=True)
+    bindings_map = {b.page_key: b for b in bindings_qs}
+
+    out = dict(base)
+    out["pageKeys"] = list(page_order)
+    out["pageBindings"] = [
+        {
+            "pageKey": b.page_key,
+            "bindingSourceType": b.binding_source_type or None,
+            "dataSourceIds": list(b.data_source_ids or []),
+        }
+        for pk in page_order
+        if (b := bindings_map.get(pk)) is not None
+    ]
+    return out
+
+
 def _get_screen_config(screen_key: str, area) -> dict:
     config = (
         ScreenConfig.objects.filter(area=area, screen_key=screen_key, is_active=True)
@@ -609,19 +657,22 @@ def _get_screen_config(screen_key: str, area) -> dict:
     if not config:
         config = ScreenConfig.objects.filter(area__isnull=True, screen_key=screen_key, is_active=True).first()
     if not config:
-        return DEFAULT_SCREEN_CONFIGS[screen_key]
-    return {
+        base = dict(DEFAULT_SCREEN_CONFIGS[screen_key])
+        base["areaCode"] = area.code
+        base["areaName"] = area.name
+        return _apply_screen_page_bindings(base, None)
+    merged = {
         "areaCode": area.code,
         "areaName": area.name,
         "screenKey": config.screen_key,
         "title": config.title,
         "subtitle": config.subtitle,
         "rotationIntervalSeconds": config.rotation_interval_seconds,
-        "pageKeys": config.page_keys,
         "moduleSettings": config.module_settings,
         "themeSettings": config.theme_settings,
         "isActive": config.is_active,
     }
+    return _apply_screen_page_bindings(merged, config)
 
 
 def _get_display_content() -> dict:
@@ -1468,13 +1519,229 @@ def _merge_line_realtime_card(pl: ProductionLine, cnc_src: DataSourceConfig | No
     }
 
 
-def _build_device_realtime_monitor(area) -> dict:
-    enabled_sources = (
-        DataSourceConfig.objects.filter(is_enabled=True, source_type="opcua", devices__area=area, devices__is_active=True)
-        .prefetch_related("devices__production_line")
-        .distinct()
-        .order_by("code")
+def _page_binding_data_source_ids(screen_config: dict, page_key: str) -> list[int]:
+    """从 screen_config['pageBindings'] 取指定 page_key 的 dataSourceIds；无则返回空列表。"""
+    for binding in screen_config.get("pageBindings") or []:
+        if binding.get("pageKey") == page_key:
+            ids = binding.get("dataSourceIds") or []
+            return [i for i in ids if isinstance(i, int) and i > 0]
+    return []
+
+
+ENERGY_CATEGORY_LABELS = {
+    1: "照明插座",
+    2: "空调",
+    3: "动力",
+    4: "特殊",
+}
+
+ENERGY_CATEGORY_COLORS = {
+    1: "#4ade80",
+    2: "#38bdf8",
+    3: "#fb923c",
+    4: "#c084fc",
+}
+
+
+def _mysql_query_rows(connection_config: dict, sql: str, params=None) -> list[dict]:
+    """Execute a SELECT against a MySQL datasource; return list of dicts."""
+    try:
+        import MySQLdb  # type: ignore
+        import MySQLdb.cursors  # type: ignore
+    except ImportError:
+        raise RuntimeError("MySQLdb (mysqlclient) 未安装，无法查询能耗数据库")
+
+    cc = connection_config
+    conn = MySQLdb.connect(
+        host=(cc.get("host") or "").strip(),
+        port=int(cc.get("port") or 3306),
+        user=(cc.get("username") or "").strip(),
+        passwd=cc.get("password") or "",
+        db=(cc.get("database") or "").strip(),
+        charset="utf8mb4",
+        connect_timeout=10,
+        read_timeout=15,
     )
+    try:
+        cur = conn.cursor(MySQLdb.cursors.DictCursor)
+        cur.execute(sql, params or ())
+        return list(cur.fetchall())
+    finally:
+        conn.close()
+
+
+def _safe_kwh(real_data, multiplying_power) -> Decimal:
+    try:
+        v = Decimal(str(real_data))
+        if multiplying_power not in (None, "", "0"):
+            v = v * Decimal(str(multiplying_power))
+        return v
+    except Exception:
+        return Decimal("0")
+
+
+def _build_energy_data_page(data_source_ids: list[int]) -> dict:
+    """
+    查询能耗平台数据库（po_day / po_month / platform_equipment），
+    构建能耗数据页面载荷供前端渲染。
+
+    data_source_ids 必须在屏幕子页面绑定中明确配置；为空时直接返回提示，
+    不做全局 database 类型的兜底搜索，以免误连 WMS 等其他数据库。
+    """
+    if not data_source_ids:
+        return _empty_energy_data_page("请在「屏幕子页面」中为能耗数据页面配置数据源")
+
+    # 信任用户选择的 ID，不再限制 source_type（energy_db 或 database 均可）
+    sources = list(
+        DataSourceConfig.objects.filter(
+            pk__in=data_source_ids,
+            is_enabled=True,
+        )
+    )
+
+    if not sources:
+        return _empty_energy_data_page("配置的能耗数据源未找到或已禁用")
+
+    source = sources[0]
+    cc = source.connection_config or {}
+
+    try:
+        today_rows = _mysql_query_rows(
+            cc,
+            """
+            SELECT
+                e.p_e_name  AS equipment_name,
+                e.p_e_code  AS equipment_code,
+                d.energy_consumption,
+                d.collection_name,
+                d.real_data,
+                d.multiplying_power,
+                d.modify_time
+            FROM po_day d
+            LEFT JOIN platform_equipment e ON d.equipment_ids = e.e_id
+            WHERE d.types = 1
+              AND d.is_flag  = '0'
+              AND d.del_flag = '0'
+              AND DATE(d.create_time) = CURDATE()
+            ORDER BY d.energy_consumption, e.p_e_code
+            """,
+        )
+        month_agg_rows = _mysql_query_rows(
+            cc,
+            """
+            SELECT
+                d.energy_consumption,
+                SUM(
+                    COALESCE(CAST(NULLIF(d.real_data,'') AS DECIMAL(18,4)), 0)
+                    * COALESCE(CAST(NULLIF(d.multiplying_power,'0') AS DECIMAL(10,4)), 1)
+                ) AS total_kwh
+            FROM po_month d
+            WHERE d.types = 1
+              AND d.is_flag  = '0'
+              AND d.del_flag = '0'
+              AND YEAR(d.create_time)  = YEAR(CURDATE())
+              AND MONTH(d.create_time) = MONTH(CURDATE())
+            GROUP BY d.energy_consumption
+            """,
+        )
+    except Exception as exc:
+        logger.exception("energy_data_page query failed: %s", exc)
+        return _empty_energy_data_page(f"数据库查询失败: {exc}")
+
+    # ── today's totals ─────────────────────────────────────────────────────
+    today_total = Decimal("0")
+    category_totals: dict[int, Decimal] = {}
+    equipment_list: list[dict] = []
+
+    for row in today_rows:
+        kwh = _safe_kwh(row.get("real_data"), row.get("multiplying_power"))
+        today_total += kwh
+        cat = int(row.get("energy_consumption") or 0)
+        category_totals[cat] = category_totals.get(cat, Decimal("0")) + kwh
+        mt = row.get("modify_time")
+        equipment_list.append(
+            {
+                "equipmentName": row.get("equipment_name") or row.get("equipment_code") or "未知设备",
+                "equipmentCode": row.get("equipment_code") or "",
+                "category": ENERGY_CATEGORY_LABELS.get(cat, "其他"),
+                "categoryId": cat,
+                "collectionName": row.get("collection_name") or "",
+                "todayKwh": str(kwh.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)),
+                "updatedAt": mt.isoformat() if hasattr(mt, "isoformat") else str(mt or ""),
+            }
+        )
+
+    # ── monthly total ───────────────────────────────────────────────────────
+    month_total = Decimal("0")
+    for row in month_agg_rows:
+        try:
+            month_total += Decimal(str(row.get("total_kwh") or 0))
+        except Exception:
+            pass
+
+    # ── category breakdown ──────────────────────────────────────────────────
+    categories = []
+    for cat_id, label in ENERGY_CATEGORY_LABELS.items():
+        val = category_totals.get(cat_id, Decimal("0"))
+        pct = int(val / today_total * 100) if today_total > 0 else 0
+        categories.append(
+            {
+                "id": cat_id,
+                "label": label,
+                "color": ENERGY_CATEGORY_COLORS[cat_id],
+                "kwh": str(val.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)),
+                "percent": pct,
+            }
+        )
+
+    return {
+        "todayKwh": str(today_total.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)),
+        "monthKwh": str(month_total.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)),
+        "unit": "kWh",
+        "categories": categories,
+        "equipmentList": equipment_list,
+        "updatedAt": timezone.localtime().isoformat(),
+        "sourceName": getattr(source, "name", None) or getattr(source, "code", ""),
+    }
+
+
+def _empty_energy_data_page(reason: str) -> dict:
+    return {
+        "todayKwh": "0.00",
+        "monthKwh": "0.00",
+        "unit": "kWh",
+        "categories": [],
+        "equipmentList": [],
+        "updatedAt": timezone.localtime().isoformat(),
+        "errorMessage": reason,
+    }
+
+
+def _build_device_realtime_monitor(area, data_source_ids: list[int] | None = None) -> dict:
+    """
+    构建设备实时监控卡片列表。
+
+    data_source_ids：若非空，只加载这些 ID 对应的 OPC UA 数据源（来自 ScreenPageBinding 配置）；
+    为空或 None 时，回退到按区域关联设备自动发现所有启用的 OPC UA 数据源。
+    """
+    if data_source_ids:
+        enabled_sources = (
+            DataSourceConfig.objects.filter(
+                pk__in=data_source_ids, is_enabled=True, source_type="opcua"
+            )
+            .prefetch_related("devices__production_line")
+            .distinct()
+            .order_by("code")
+        )
+    else:
+        enabled_sources = (
+            DataSourceConfig.objects.filter(
+                is_enabled=True, source_type="opcua", devices__area=area, devices__is_active=True
+            )
+            .prefetch_related("devices__production_line")
+            .distinct()
+            .order_by("code")
+        )
     min_interval = None
     for source in enabled_sources:
         min_interval = source.refresh_interval_seconds if min_interval is None else min(min_interval, source.refresh_interval_seconds)
@@ -1662,7 +1929,7 @@ def _test_data_source_connectivity(source: DataSourceConfig) -> bool:
     connection_config = source.connection_config or {}
     if source_type == "opcua":
         return test_opcua_connection(connection_config, node=source.node).ok
-    if source_type in {"database", "schedule_db", "energy_db", "wms"}:
+    if source_type in {"database", "energy_db", "schedule_db", "wms"}:
         return test_database_connection(connection_config).ok
     # Other source types keep compatibility with existing "mock pass" policy.
     return True

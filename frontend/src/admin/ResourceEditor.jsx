@@ -122,8 +122,15 @@ export function ResourceEditor({ activeResource, token, onUnauthorized }) {
 
   const resourceDependencies = useMemo(() => {
     const nextDependencies = new Set();
+    for (const key of resourceDefinition.relatedResources ?? []) {
+      nextDependencies.add(key);
+    }
     for (const field of resourceDefinition.fields) {
-      if (field.type === "resourceSelect" || field.type === "resourceMultiSelect") {
+      if (
+        field.type === "resourceSelect" ||
+        field.type === "resourceMultiSelect" ||
+        field.type === "resourceMultiSelectFiltered"
+      ) {
         nextDependencies.add(field.resource);
       }
     }

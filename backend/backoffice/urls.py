@@ -15,6 +15,7 @@ from .views import (
     ProductionLineViewSet,
     RuntimeParameterConfigViewSet,
     ScreenConfigViewSet,
+    ScreenPageBindingViewSet,
 )
 
 
@@ -30,6 +31,7 @@ router.register("screen-configs", ScreenConfigViewSet, basename="admin-screen-co
 router.register("display-content-configs", DisplayContentConfigViewSet, basename="admin-display-content-config")
 router.register("runtime-parameter-configs", RuntimeParameterConfigViewSet, basename="admin-runtime-parameter-config")
 router.register("page-module-switches", PageModuleSwitchViewSet, basename="admin-page-module-switch")
+router.register("screen-page-bindings", ScreenPageBindingViewSet, basename="admin-screen-page-binding")
 router.register("data-source-configs", DataSourceConfigViewSet, basename="admin-data-source-config")
 router.register("data-source-healths", DataSourceHealthSnapshotViewSet, basename="admin-data-source-health")
 router.register("operation-logs", OperationLogViewSet, basename="admin-operation-log")

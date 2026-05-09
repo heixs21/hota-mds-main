@@ -41,20 +41,37 @@ const SCREEN_KEY_OPTIONS = [
   { value: "right", label: "右屏" },
 ];
 
-/** 子页面键与中文名（与大屏前端 PAGE_PRESETS 一致），供后台穿梭框使用 */
-export const SCREEN_PAGE_KEY_OPTIONS = {
-  left: {
-    overview: "综合总览",
-    operations: "运行与产量",
-    energy: "能耗与占位",
-    realtime: "设备实时监控",
-  },
-  right: {
-    schedule: "排产总览",
-    risk: "风险说明",
-    simulation: "仿真预留",
-  },
+/** 全部子页面键与中文名（与大屏前端 PAGE_PRESETS 一致），可自由分配到左或右屏 */
+export const ALL_PAGE_KEY_OPTIONS = {
+  overview: "综合总览",
+  operations: "运行与产量",
+  energy: "能耗数据",
+  realtime: "设备实时监控",
+  schedule: "排产总览",
+  risk: "风险说明",
+  simulation: "仿真预留",
 };
+
+/** 供穿梭框使用：两个屏幕都能看到全部页面，用户自行决定顺序 */
+export const SCREEN_PAGE_KEY_OPTIONS = {
+  left: ALL_PAGE_KEY_OPTIONS,
+  right: ALL_PAGE_KEY_OPTIONS,
+};
+
+/** 屏幕子页面绑定表单下拉选项 */
+export const SCREEN_PAGE_KEY_FLAT_OPTIONS = Object.entries(ALL_PAGE_KEY_OPTIONS).map(
+  ([value, label]) => ({ value, label }),
+);
+
+/** 子页面绑定：先选接入类型，再在下拉里多选同类型的具体数据源 */
+export const DATA_SOURCE_BINDING_CATEGORY_OPTIONS = [
+  { value: "", label: "未指定（沿用内置快照）" },
+  { value: "opcua", label: "OPC UA" },
+  { value: "database", label: "数据库" },
+  { value: "modbus_tcp", label: "Modbus TCP" },
+  { value: "sap_rfc", label: "SAP RFC" },
+  { value: "repair", label: "报修系统" },
+];
 
 const ENTITY_TYPE_OPTIONS = [
   { value: "device", label: "设备" },
@@ -85,7 +102,7 @@ export const ADMIN_MENU_GROUPS = [
   {
     id: "screen",
     label: "大屏配置",
-    items: ["screenConfigs", "pageModuleSwitches", "displayContentConfigs", "runtimeParameterConfigs"],
+    items: ["screenPageBindings", "screenConfigs", "pageModuleSwitches", "displayContentConfigs", "runtimeParameterConfigs"],
   },
   {
     id: "system",
@@ -131,7 +148,7 @@ const DATA_SOURCE_BASE_COLUMNS = [
 ];
 
 const DATA_SOURCE_TYPE_FIELDS = {
-  opcua: [
+  opcua: [  // OPC UA stays separate — it has its own connection fields & polling logic
     {
       key: "endpointUrl",
       label: "服务器地址 (Endpoint URL)",
@@ -166,7 +183,7 @@ const DATA_SOURCE_TYPE_FIELDS = {
       defaultValue: "",
     },
   ],
-  database: [
+    database: [
     {
       key: "engine",
       label: "数据库类型",
@@ -483,6 +500,7 @@ export const resourceDefinitions = {
     itemLabel: "屏幕配置",
     useModalForm: true,
     wideModal: true,
+    relatedResources: ["screenPageBindings"],
     columns: [
       { key: "areaName", label: "区域" },
       { key: "screenKey", label: "屏幕" },
@@ -510,15 +528,86 @@ export const resourceDefinitions = {
       { key: "subtitle", label: "副标题", type: "text", defaultValue: "" },
       { key: "rotationIntervalSeconds", label: "轮播时长（秒）", type: "integer", required: true, defaultValue: 60 },
       {
-        key: "pageKeys",
-        label: "子页面显示列表",
+        key: "pageOrder",
+        label: "轮播子页面顺序",
         type: "screenPageTransfer",
         screenKeyField: "screenKey",
-        defaultValue: ["overview"],
+        defaultValue: [],
       },
       { key: "moduleSettings", label: "模块开关", type: "json", defaultValue: {} },
       { key: "themeSettings", label: "主题配置", type: "json", defaultValue: {} },
       { key: "isActive", label: "启用", type: "checkbox", defaultValue: true },
+      ...RESERVED_FIELDS,
+    ],
+  },
+  dataSourceConfigs: {
+    label: "数据源列表",
+    endpoint: "/api/admin/data-source-configs",
+    itemLabel: "数据源",
+    useModalForm: true,
+    columns: [
+      { key: "code", label: "编码" },
+      { key: "name", label: "名称" },
+      { key: "sourceType", label: "类型" },
+    ],
+    queryFields: [],
+    fields: [
+      { key: "code", label: "编码", type: "text", required: true, defaultValue: "" },
+      { key: "name", label: "名称", type: "text", required: true, defaultValue: "" },
+      ...RESERVED_FIELDS,
+    ],
+  },
+  screenPageBindings: {
+    label: "屏幕子页面",
+    endpoint: "/api/admin/screen-page-bindings",
+    itemLabel: "子页面",
+    useModalForm: true,
+    columns: [
+      { key: "pageKeyLabel", label: "子页面" },
+      { key: "screenKey", label: "屏幕", options: SCREEN_KEY_OPTIONS },
+      { key: "bindingSourceType", label: "数据源类型", options: DATA_SOURCE_BINDING_CATEGORY_OPTIONS },
+      { key: "dataSourceIds", label: "数据源", cellFormat: "idCount" },
+      { key: "isEnabled", label: "启用" },
+    ],
+    queryFields: [
+      { key: "screen_key", label: "屏幕", type: "select", options: SCREEN_KEY_OPTIONS },
+      { key: "is_enabled", label: "启用状态", type: "select", options: ACTIVE_STATUS_OPTIONS },
+    ],
+    fields: [
+      {
+        key: "pageKey",
+        label: "子页面",
+        type: "select",
+        required: true,
+        defaultValue: "overview",
+        options: SCREEN_PAGE_KEY_FLAT_OPTIONS,
+      },
+      {
+        key: "screenKey",
+        label: "屏幕",
+        type: "select",
+        required: true,
+        defaultValue: "left",
+        options: SCREEN_KEY_OPTIONS,
+      },
+      {
+        key: "bindingSourceType",
+        label: "数据源类型",
+        type: "select",
+        defaultValue: "",
+        options: DATA_SOURCE_BINDING_CATEGORY_OPTIONS,
+      },
+      {
+        key: "dataSourceIds",
+        label: "数据源（按类型筛选，可多选）",
+        type: "resourceMultiSelectFiltered",
+        resource: "dataSourceConfigs",
+        filterByField: "bindingSourceType",
+        filterOptionKey: "sourceType",
+        defaultValue: [],
+      },
+      { key: "isEnabled", label: "启用", type: "checkbox", defaultValue: true },
+      { key: "notes", label: "备注", type: "textarea", defaultValue: "" },
       ...RESERVED_FIELDS,
     ],
   },
@@ -639,11 +728,16 @@ export function stringifyJson(value) {
 export function createEmptyForm(resourceDefinition) {
   const nextState = {};
   for (const field of resourceDefinition.fields) {
+    if (field.type === "staticHint") {
+      continue;
+    }
     if (field.type === "json" || field.type === "screenPageTransfer") {
       const rawDefault = field.defaultValue ?? {};
       nextState[field.key] = Object.keys(rawDefault).length === 0 && field.omitIfBlank ? "" : stringifyJson(rawDefault);
     } else if (field.type === "checkbox") {
       nextState[field.key] = Boolean(field.defaultValue);
+    } else if (field.type === "resourceMultiSelect" || field.type === "resourceMultiSelectFiltered") {
+      nextState[field.key] = Array.isArray(field.defaultValue) ? [...field.defaultValue] : [];
     } else {
       nextState[field.key] = field.defaultValue ?? "";
     }
@@ -676,6 +770,9 @@ export function createEmptyQuery(resourceDefinition) {
 export function createFormFromItem(resourceDefinition, item) {
   const nextState = {};
   for (const field of resourceDefinition.fields) {
+    if (field.type === "staticHint") {
+      continue;
+    }
     const rawValue = field.storage
       ? readNestedValue(item, field.storage, field.key)
       : item?.[field.key];
@@ -687,6 +784,14 @@ export function createFormFromItem(resourceDefinition, item) {
       }
     } else if (field.type === "checkbox") {
       nextState[field.key] = Boolean(rawValue);
+    } else if (field.type === "resourceMultiSelect" || field.type === "resourceMultiSelectFiltered") {
+      if (Array.isArray(rawValue)) {
+        nextState[field.key] = rawValue
+          .map((v) => Number(v))
+          .filter((n) => Number.isInteger(n) && n > 0);
+      } else {
+        nextState[field.key] = Array.isArray(field.defaultValue) ? [...field.defaultValue] : [];
+      }
     } else if (rawValue === null || rawValue === undefined) {
       nextState[field.key] = field.defaultValue ?? "";
     } else {
@@ -701,6 +806,9 @@ export function createFormFromItem(resourceDefinition, item) {
  * @param {object} [fullForm]  全表状态；`screenPageTransfer` 需用其 `screenKey` 与备选项对齐
  */
 export function parseFieldValue(field, rawValue, fullForm) {
+  if (field.type === "staticHint") {
+    return OMIT_VALUE;
+  }
   if (field.type === "checkbox") {
     return Boolean(rawValue);
   }
@@ -713,7 +821,7 @@ export function parseFieldValue(field, rawValue, fullForm) {
   if (field.type === "resourceSelect") {
     return rawValue === "" ? null : Number(rawValue);
   }
-  if (field.type === "resourceMultiSelect") {
+  if (field.type === "resourceMultiSelect" || field.type === "resourceMultiSelectFiltered") {
     if (!Array.isArray(rawValue)) {
       return [];
     }
@@ -785,6 +893,9 @@ function formatCstDateTime(value) {
 export function formatCellValue(value, column) {
   if (column?.cellFormat === "cstDateTime") {
     return formatCstDateTime(value);
+  }
+  if (Array.isArray(value) && column?.cellFormat === "idCount") {
+    return value.length ? `${value.length} 项` : "-";
   }
   if (value === null || value === undefined || value === "") {
     return "-";

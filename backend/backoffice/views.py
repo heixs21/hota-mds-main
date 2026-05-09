@@ -26,6 +26,7 @@ from .models import (
     ProductionLine,
     RuntimeParameterConfig,
     ScreenConfig,
+    ScreenPageBinding,
 )
 from .opcua_history_services import ensure_opcua_history_samples
 from .connection_test_services import test_database_connection, test_opcua_connection
@@ -45,6 +46,7 @@ from .serializers import (
     ProductionLineSerializer,
     RuntimeParameterConfigSerializer,
     ScreenConfigSerializer,
+    ScreenPageBindingSerializer,
 )
 
 
@@ -408,7 +410,7 @@ class DataSourceConfigViewSet(AdminApiViewSet):
                 },
             )
 
-        if source_type == "database":
+        if source_type in {"database", "energy_db", "schedule_db", "wms"}:
             result = test_database_connection(connection_config)
             if not result.ok:
                 return error_response("CONNECTION_FAILED", result.message, 400)
@@ -464,6 +466,17 @@ class PageModuleSwitchViewSet(AdminApiViewSet):
     exact_filter_fields = ["screen_key"]
     ordering_fields = ["id", "screen_key", "module_key", "sort_order", "is_enabled", "created_at", "updated_at"]
     default_ordering = ["screen_key", "sort_order"]
+
+
+class ScreenPageBindingViewSet(AdminApiViewSet):
+    queryset = ScreenPageBinding.objects.all()
+    serializer_class = ScreenPageBindingSerializer
+    target_type = "screen_page_binding"
+    search_fields = ["page_key", "notes"]
+    boolean_filter_fields = ["is_enabled"]
+    exact_filter_fields = ["screen_key"]
+    ordering_fields = ["id", "screen_key", "page_key", "is_enabled", "created_at", "updated_at"]
+    default_ordering = ["screen_key", "page_key"]
 
 
 class DataSourceHealthSnapshotViewSet(viewsets.ReadOnlyModelViewSet):

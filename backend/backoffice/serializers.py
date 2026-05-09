@@ -20,6 +20,7 @@ from .models import (
     RuntimeParameterConfig,
     ScheduleSnapshot,
     ScreenConfig,
+    ScreenPageBinding,
 )
 
 
@@ -28,6 +29,9 @@ RESERVED_FIELDS = ["reserved_1", "reserved_2", "reserved_3", "reserved_4", "rese
 CONNECTION_CONFIG_ALLOWED_KEYS = {
     "opcua": {"endpointUrl", "username", "password"},
     "database": {"engine", "host", "port", "database", "username", "password"},
+    "energy_db": {"engine", "host", "port", "database", "username", "password"},
+    "schedule_db": {"engine", "host", "port", "database", "username", "password"},
+    "wms": {"engine", "host", "port", "database", "username", "password"},
     "modbus_tcp": set(),
     "sap_rfc": set(),
     "repair": set(),
@@ -167,9 +171,9 @@ class ScreenConfigSerializer(CamelCaseModelSerializer):
     area_id = serializers.PrimaryKeyRelatedField(source="area", queryset=Area.objects.all(), allow_null=True, required=False)
     area_name = serializers.CharField(source="area.name", read_only=True)
 
-    def validate_page_keys(self, value):
+    def validate_page_order(self, value):
         if not isinstance(value, list):
-            raise serializers.ValidationError("pageKeys must be a list")
+            raise serializers.ValidationError("pageOrder must be a list")
         return value
 
     def validate_module_settings(self, value):
@@ -205,7 +209,7 @@ class ScreenConfigSerializer(CamelCaseModelSerializer):
             "title",
             "subtitle",
             "rotation_interval_seconds",
-            "page_keys",
+            "page_order",
             "module_settings",
             "theme_settings",
             "is_active",
@@ -483,6 +487,57 @@ class PageModuleSwitchSerializer(CamelCaseModelSerializer):
             "created_at",
             "updated_at",
         ] + RESERVED_FIELDS
+
+
+VALID_PAGE_KEYS = frozenset({"overview", "operations", "energy", "realtime", "schedule", "risk", "simulation"})
+
+PAGE_KEY_LABELS = {
+    "overview": "综合总览",
+    "operations": "运行与产量",
+    "energy": "能耗数据",
+    "realtime": "设备实时监控",
+    "schedule": "排产总览",
+    "risk": "风险说明",
+    "simulation": "仿真预留",
+}
+
+
+class ScreenPageBindingSerializer(CamelCaseModelSerializer):
+    page_key_label = serializers.SerializerMethodField()
+    data_source_ids = serializers.ListField(
+        child=serializers.IntegerField(min_value=1),
+        required=False,
+        allow_empty=True,
+    )
+
+    def get_page_key_label(self, obj):
+        return PAGE_KEY_LABELS.get(obj.page_key, obj.page_key)
+
+    class Meta:
+        model = ScreenPageBinding
+        fields = [
+            "id",
+            "screen_key",
+            "page_key",
+            "page_key_label",
+            "binding_source_type",
+            "data_source_ids",
+            "is_enabled",
+            "notes",
+            "created_at",
+            "updated_at",
+        ] + RESERVED_FIELDS
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        instance = getattr(self, "instance", None)
+        screen_key = attrs.get("screen_key", getattr(instance, "screen_key", None))
+        page_key = attrs.get("page_key", getattr(instance, "page_key", None))
+        if page_key and page_key not in VALID_PAGE_KEYS:
+            raise serializers.ValidationError(
+                {"page_key": f"page_key '{page_key}' is not a known page key"}
+            )
+        return attrs
 
 
 class OperationLogSerializer(CamelCaseModelSerializer):

@@ -1,16 +1,30 @@
 import { useEffect, useState } from "react";
 
-import { SCREEN_PAGE_KEY_OPTIONS, stringifyJson } from "../../adminResources.js";
+import { ALL_PAGE_KEY_OPTIONS, SCREEN_PAGE_KEY_OPTIONS, stringifyJson } from "../../adminResources.js";
 import { parseScreenPageTargetKeys } from "./screenPageTransfer.js";
 
 /**
  * 「大屏配置」模块专用：屏幕轮播子页面穿梭框。
+ * 若 relatedOptions.screenPageBindings 已加载，则只展示该屏已配置的子页面作为备选；
+ * 否则回落到静态 SCREEN_PAGE_KEY_OPTIONS。
  */
-export function ScreenPageTransferField({ field, formState, setFormState }) {
+export function ScreenPageTransferField({ field, formState, setFormState, relatedOptions }) {
   const screenKeyField = field.screenKeyField ?? "screenKey";
   const screenKey = formState[screenKeyField] || "left";
-  const options = SCREEN_PAGE_KEY_OPTIONS[screenKey] || {};
-  const validKeys = Object.keys(options);
+
+  // 优先从绑定数据动态计算该屏的可用页面
+  const bindings = relatedOptions?.screenPageBindings;
+  let options, validKeys;
+  if (Array.isArray(bindings) && bindings.length > 0) {
+    const forScreen = bindings.filter((b) => b.screenKey === screenKey);
+    options = Object.fromEntries(
+      forScreen.map((b) => [b.pageKey, b.pageKeyLabel || ALL_PAGE_KEY_OPTIONS[b.pageKey] || b.pageKey]),
+    );
+    validKeys = forScreen.map((b) => b.pageKey);
+  } else {
+    options = SCREEN_PAGE_KEY_OPTIONS[screenKey] || {};
+    validKeys = Object.keys(options);
+  }
 
   const targetKeys = parseScreenPageTargetKeys(formState[field.key], validKeys, screenKey);
   const sourceKeys = validKeys.filter((k) => !targetKeys.includes(k));

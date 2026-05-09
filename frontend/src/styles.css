@@ -1,4 +1,4 @@
-﻿/* ================================================================
+/* ================================================================
    HOTA MDS 鈥?Global foundations & placeholder home (unchanged look)
    ================================================================ */
 
@@ -1704,6 +1704,25 @@ html[data-theme="dark"] {
   background: var(--adm-accent-bg);
 }
 
+/* 左右屏配置：说明文案（子页面在「屏幕子页面」维护） */
+.field--static-hint {
+  grid-column: 1 / -1;
+}
+
+.field-label-static {
+  display: block;
+  font-size: 0.78rem;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.field-hint.field-hint--admin {
+  color: var(--adm-text-5);
+  font-size: 0.75rem;
+  line-height: 1.45;
+  margin: 0;
+}
+
 /* 左右屏配置：子页面穿梭框 */
 .field--screen-transfer {
   grid-column: 1 / -1;
@@ -2394,7 +2413,8 @@ html[data-theme="dark"] {
   min-height: 0;
 }
 
-.screen-left .screen-panel.panel-unbounded {
+.screen-left .screen-panel.panel-unbounded,
+.screen-right .screen-panel.panel-unbounded {
   height: auto;
   min-height: 0;
   overflow: visible;
@@ -2991,14 +3011,28 @@ html[data-theme="dark"] {
   min-height: 0;
 }
 
-.screen-grid-left-realtime {
+.screen-grid-left-realtime,
+.screen-grid-realtime {
   display: block;
   height: auto;
   min-height: 0;
   overflow-y: auto;
 }
 
-.screen-grid-left-realtime .industrial-realtime-panel {
+.screen-grid-left-realtime .industrial-realtime-panel,
+.screen-grid-realtime .industrial-realtime-panel {
+  min-height: calc(100vh - 240px);
+}
+
+/* ── energy page full-height container ──────────────────────────── */
+.screen-grid-energy {
+  display: block;
+  height: auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.screen-grid-energy .energy-data-panel {
   min-height: calc(100vh - 240px);
 }
 
@@ -4366,5 +4400,278 @@ html[data-theme="dark"] {
   .gantt-days-track,
   .gantt-track {
     min-width: 720px;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   Energy Data Page
+   ══════════════════════════════════════════════════════════════════ */
+
+.energy-data-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 20px 24px;
+}
+
+/* Header */
+.energy-data-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.energy-data-header-left {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.energy-data-header-left h2 {
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: #e2e8f0;
+  margin: 0;
+}
+
+.energy-data-source {
+  font-size: 0.75rem;
+  color: #64748b;
+}
+
+.energy-data-header-kpi {
+  display: flex;
+  gap: 16px;
+}
+
+.energy-kpi-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 10px 16px;
+  min-width: 150px;
+}
+
+.energy-kpi-label {
+  font-size: 0.72rem;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.energy-kpi-value {
+  font-size: 1.4rem;
+  font-weight: 700;
+  margin-top: 4px;
+}
+
+.energy-kpi-value.accent-teal { color: #2dd4bf; }
+.energy-kpi-value.accent-blue { color: #60a5fa; }
+
+/* Error */
+.energy-data-error {
+  padding: 10px 14px;
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  border-radius: 6px;
+  color: #f87171;
+  font-size: 0.82rem;
+}
+
+/* Body */
+.energy-data-body {
+  display: grid;
+  grid-template-columns: 340px 1fr;
+  gap: 20px;
+  flex: 1;
+  min-height: 0;
+}
+
+.energy-block-title {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  margin: 0 0 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.energy-block-subtitle {
+  font-weight: 400;
+  font-size: 0.72rem;
+  color: #64748b;
+  text-transform: none;
+}
+
+/* Category bars */
+.energy-category-block {
+  display: flex;
+  flex-direction: column;
+}
+
+.energy-category-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.energy-category-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 44px;
+  gap: 10px;
+  align-items: center;
+}
+
+.energy-category-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.energy-category-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.energy-category-name {
+  font-size: 0.85rem;
+  color: #cbd5e1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.energy-category-kwh {
+  font-size: 0.78rem;
+  color: #94a3b8;
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.energy-category-bar-track {
+  height: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.energy-category-bar-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.6s ease;
+  min-width: 2px;
+}
+
+.energy-category-pct {
+  font-size: 0.78rem;
+  color: #94a3b8;
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* Equipment list */
+.energy-equipment-block {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.energy-equipment-list {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: calc(100vh - 420px);
+  padding-right: 6px;
+}
+
+.energy-equipment-list::-webkit-scrollbar {
+  width: 4px;
+}
+.energy-equipment-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+.energy-equipment-list::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+}
+
+.energy-equipment-item {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+  transition: background 0.15s;
+}
+
+.energy-equipment-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.energy-equipment-name {
+  font-size: 0.88rem;
+  color: #e2e8f0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.energy-equipment-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+.energy-equipment-category {
+  font-size: 0.7rem;
+  color: #64748b;
+  background: rgba(255, 255, 255, 0.05);
+  padding: 1px 6px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+
+.energy-equipment-collection {
+  font-size: 0.68rem;
+  color: #475569;
+  white-space: nowrap;
+}
+
+.energy-equipment-kwh {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #2dd4bf;
+  white-space: nowrap;
+  min-width: 90px;
+  text-align: right;
+}
+
+.energy-equipment-empty {
+  padding: 24px 0;
+  text-align: center;
+  color: #475569;
+  font-size: 0.85rem;
+}
+
+@media (max-width: 1200px) {
+  .energy-data-body {
+    grid-template-columns: 1fr;
   }
 }

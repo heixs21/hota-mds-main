@@ -170,7 +170,6 @@ class BackofficeApiTests(TestCase):
                 "title": "左屏展示",
                 "subtitle": "综合运行",
                 "rotationIntervalSeconds": 60,
-                "pageKeys": ["overview"],
                 "moduleSettings": {"repairPlaceholder": True},
                 "themeSettings": {"logoUrl": "/assets/logo.png"},
                 "isActive": True,
@@ -772,6 +771,34 @@ class BackofficeApiTests(TestCase):
             format="json",
         )
         self.assertEqual(dup.status_code, 400)
+
+    def test_screen_page_binding_crud(self):
+        create = self.client.post(
+            "/api/admin/screen-page-bindings",
+            {
+                "screenKey": "left",
+                "pageKey": "energy",
+                "bindingSourceType": "",
+                "dataSourceIds": [],
+                "deviceIds": [],
+                "isEnabled": True,
+            },
+            format="json",
+        )
+        self.assertEqual(create.status_code, 201)
+        self.assertEqual(create.data["data"]["pageKey"], "energy")
+        self.assertEqual(create.data["data"]["pageKeyLabel"], "能耗数据")
+
+    def test_screen_page_binding_rejects_mismatched_screen_page(self):
+        bad = self.client.post(
+            "/api/admin/screen-page-bindings",
+            {
+                "screenKey": "left",
+                "pageKey": "schedule",
+            },
+            format="json",
+        )
+        self.assertEqual(bad.status_code, 400)
 
 
 class AreaLineDeviceCascadeTests(TestCase):

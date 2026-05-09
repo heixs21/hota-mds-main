@@ -1,7 +1,28 @@
 import { ScreenPageTransferField } from "./screen/ScreenPageTransferField.jsx";
 
+function matchesVisibleWhen(field, formState) {
+  const w = field.visibleWhen;
+  if (!w) {
+    return true;
+  }
+  return String(formState[w.field] ?? "") === String(w.value);
+}
+
 export function ResourceField({ field, formState, setFormState, relatedOptions }) {
   const value = formState[field.key];
+
+  if (!matchesVisibleWhen(field, formState)) {
+    return null;
+  }
+
+  if (field.type === "staticHint") {
+    return (
+      <div className="field field--static-hint">
+        {field.label ? <span className="field-label-static">{field.label}</span> : null}
+        <p className="field-hint field-hint--admin">{field.text ?? ""}</p>
+      </div>
+    );
+  }
 
   function updateValue(nextValue) {
     setFormState((current) => ({
@@ -11,7 +32,7 @@ export function ResourceField({ field, formState, setFormState, relatedOptions }
   }
 
   if (field.type === "screenPageTransfer") {
-    return <ScreenPageTransferField field={field} formState={formState} setFormState={setFormState} />;
+    return <ScreenPageTransferField field={field} formState={formState} setFormState={setFormState} relatedOptions={relatedOptions} />;
   }
 
   if (field.type === "checkbox") {
@@ -66,6 +87,60 @@ export function ResourceField({ field, formState, setFormState, relatedOptions }
           ))}
         </select>
       </label>
+    );
+  }
+
+  if (field.type === "resourceMultiSelectFiltered") {
+    const rawOptions = relatedOptions[field.resource] ?? [];
+    const filterKey = field.filterOptionKey ?? "sourceType";
+    const ft = String(formState[field.filterByField] ?? "").trim();
+    const options = ft ? rawOptions.filter((opt) => String(opt[filterKey] ?? "") === ft) : [];
+    const selectedSet = new Set(Array.isArray(value) ? value.map((item) => String(item)) : []);
+
+    function toggleOption(optionId, checked) {
+      const next = new Set(selectedSet);
+      const key = String(optionId);
+      if (checked) {
+        next.add(key);
+      } else {
+        next.delete(key);
+      }
+      updateValue(
+        [...next]
+          .map((id) => Number(id))
+          .filter((id) => Number.isInteger(id) && id > 0),
+      );
+    }
+
+    const emptyHint = ft ? "该类型下暂无数据源，请先在「数据源配置」中新建。" : "请先在上方的「数据源类型」中选择 OPC UA、数据库等。";
+
+    return (
+      <div className="field field--multi-select">
+        <span>{field.label}</span>
+        <p className="field-hint resource-multi-select-hint">仅列出与所选类型一致的数据源；可多选。</p>
+        <div className="resource-multi-select-scroll" role="group" aria-label={field.label}>
+          {!ft ? (
+            <div className="resource-multi-select-empty">{emptyHint}</div>
+          ) : options.length === 0 ? (
+            <div className="resource-multi-select-empty">{emptyHint}</div>
+          ) : (
+            options.map((option) => {
+              const idStr = String(option.id);
+              const labelText = option.code ? `${option.code} - ${option.name}` : option.name;
+              return (
+                <label className="resource-multi-select-row" key={option.id}>
+                  <input
+                    checked={selectedSet.has(idStr)}
+                    onChange={(event) => toggleOption(option.id, event.target.checked)}
+                    type="checkbox"
+                  />
+                  <span>{labelText}</span>
+                </label>
+              );
+            })
+          )}
+        </div>
+      </div>
     );
   }
 
