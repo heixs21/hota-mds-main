@@ -1,3 +1,5 @@
+from decimal import Decimal, InvalidOperation
+
 from django.db.models import Q
 from django.utils import timezone
 from django.utils.dateparse import parse_date, parse_datetime
@@ -63,7 +65,14 @@ class AdminApiViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         queryset = super().get_queryset()
-        if self.action in ("list", "batch_delete"):
+        if self.action in (
+            "list",
+            "batch_delete",
+            "bulk_refresh_interval",
+            "bulk_rotation_interval",
+            "bulk_runtime_fields",
+            "bulk_set_enabled",
+        ):
             return self._apply_query_filters(queryset)
         return queryset
 
@@ -327,6 +336,53 @@ class ScreenConfigViewSet(AdminApiViewSet):
     ordering_fields = ["id", "screen_key", "title", "is_active", "area__code", "created_at", "updated_at"]
     default_ordering = ["area__code", "screen_key"]
 
+    @action(detail=False, methods=["post"], url_path="bulk-rotation-interval")
+    def bulk_rotation_interval(self, request):
+        """按勾选 id 批量设置左右屏配置的轮播时长（秒）；查询参数与列表一致以校验可见性。"""
+        payload = request.data or {}
+        ids = payload.get("ids")
+        if not isinstance(ids, list) or len(ids) == 0:
+            return error_response("INVALID_PARAMS", "ids must be a non-empty list", 400)
+        if len(ids) > 200:
+            return error_response("INVALID_PARAMS", "batch rotation interval limited to 200 items", 400)
+
+        raw_seconds = payload.get("rotationIntervalSeconds")
+        try:
+            seconds = int(raw_seconds)
+        except (TypeError, ValueError):
+            return error_response("INVALID_PARAMS", "rotationIntervalSeconds must be an integer", 400)
+        if seconds < 5 or seconds > 86400:
+            return error_response("INVALID_PARAMS", "rotationIntervalSeconds must be between 5 and 86400", 400)
+
+        try:
+            unique_ids = {int(pk) for pk in ids}
+        except (TypeError, ValueError):
+            return error_response("INVALID_PARAMS", "ids must be integers", 400)
+
+        queryset = self.get_queryset().filter(pk__in=unique_ids)
+        if queryset.count() != len(unique_ids):
+            return error_response(
+                "INVALID_PARAMS",
+                "some ids are missing or not visible under current filters",
+                400,
+            )
+
+        updated = queryset.update(rotation_interval_seconds=seconds)
+
+        log_operation(
+            actor=request.user,
+            action="UPDATE",
+            target_type=self.target_type,
+            target_id="bulk",
+            target_label=f"bulk rotation interval -> {seconds}s ({updated} rows)",
+            request=request,
+            change_summary={"rotationIntervalSeconds": seconds, "updatedCount": updated, "ids": list(unique_ids)},
+        )
+        return success_response(
+            "bulk rotation interval updated",
+            {"updatedCount": updated, "rotationIntervalSeconds": seconds},
+        )
+
 
 class DisplayContentConfigViewSet(AdminApiViewSet):
     queryset = DisplayContentConfig.objects.all()
@@ -348,6 +404,80 @@ class RuntimeParameterConfigViewSet(AdminApiViewSet):
     exact_filter_fields = ["config_key"]
     ordering_fields = ["id", "config_key", "is_active", "created_at", "updated_at"]
     default_ordering = ["config_key"]
+
+    @action(detail=False, methods=["post"], url_path="bulk-runtime-fields")
+    def bulk_runtime_fields(self, request):
+        """按勾选 id 批量设置日有效工时与甘特窗口天数；查询参数与列表一致。"""
+        payload = request.data or {}
+        ids = payload.get("ids")
+        if not isinstance(ids, list) or len(ids) == 0:
+            return error_response("INVALID_PARAMS", "ids must be a non-empty list", 400)
+        if len(ids) > 200:
+            return error_response("INVALID_PARAMS", "batch limited to 200 items", 400)
+
+        raw_hours = payload.get("singleDayEffectiveWorkHours")
+        raw_days = payload.get("ganttWindowDays")
+        if raw_hours is None or raw_days is None:
+            return error_response(
+                "INVALID_PARAMS",
+                "singleDayEffectiveWorkHours and ganttWindowDays are required",
+                400,
+            )
+
+        try:
+            hours_dec = Decimal(str(raw_hours))
+        except (InvalidOperation, TypeError, ValueError):
+            return error_response("INVALID_PARAMS", "singleDayEffectiveWorkHours must be a decimal number", 400)
+        if hours_dec <= 0 or hours_dec > 24:
+            return error_response(
+                "INVALID_PARAMS",
+                "singleDayEffectiveWorkHours must be greater than 0 and at most 24",
+                400,
+            )
+
+        try:
+            days_int = int(raw_days)
+        except (TypeError, ValueError):
+            return error_response("INVALID_PARAMS", "ganttWindowDays must be an integer", 400)
+        if days_int <= 0:
+            return error_response("INVALID_PARAMS", "ganttWindowDays must be greater than 0", 400)
+
+        try:
+            unique_ids = {int(pk) for pk in ids}
+        except (TypeError, ValueError):
+            return error_response("INVALID_PARAMS", "ids must be integers", 400)
+
+        queryset = self.get_queryset().filter(pk__in=unique_ids)
+        if queryset.count() != len(unique_ids):
+            return error_response(
+                "INVALID_PARAMS",
+                "some ids are missing or not visible under current filters",
+                400,
+            )
+
+        updated = queryset.update(
+            single_day_effective_work_hours=hours_dec,
+            gantt_window_days=days_int,
+        )
+
+        log_operation(
+            actor=request.user,
+            action="UPDATE",
+            target_type=self.target_type,
+            target_id="bulk",
+            target_label=f"bulk runtime fields hours={hours_dec} days={days_int} ({updated} rows)",
+            request=request,
+            change_summary={
+                "singleDayEffectiveWorkHours": str(hours_dec),
+                "ganttWindowDays": days_int,
+                "updatedCount": updated,
+                "ids": list(unique_ids),
+            },
+        )
+        return success_response(
+            "bulk runtime fields updated",
+            {"updatedCount": updated},
+        )
 
 
 class DataSourceConfigViewSet(AdminApiViewSet):
@@ -432,6 +562,53 @@ class DataSourceConfigViewSet(AdminApiViewSet):
             },
         )
 
+    @action(detail=False, methods=["post"], url_path="bulk-refresh-interval")
+    def bulk_refresh_interval(self, request):
+        """按勾选 id 批量设置数据源的轮询间隔（秒）；列表 source_type 等筛选与记录可见性一致。"""
+        payload = request.data or {}
+        ids = payload.get("ids")
+        if not isinstance(ids, list) or len(ids) == 0:
+            return error_response("INVALID_PARAMS", "ids must be a non-empty list", 400)
+        if len(ids) > 200:
+            return error_response("INVALID_PARAMS", "batch refresh interval limited to 200 items", 400)
+
+        raw_seconds = payload.get("refreshIntervalSeconds")
+        try:
+            seconds = int(raw_seconds)
+        except (TypeError, ValueError):
+            return error_response("INVALID_PARAMS", "refreshIntervalSeconds must be an integer", 400)
+        if seconds < 5 or seconds > 86400:
+            return error_response("INVALID_PARAMS", "refreshIntervalSeconds must be between 5 and 86400", 400)
+
+        try:
+            unique_ids = {int(pk) for pk in ids}
+        except (TypeError, ValueError):
+            return error_response("INVALID_PARAMS", "ids must be integers", 400)
+
+        queryset = self.get_queryset().filter(pk__in=unique_ids)
+        if queryset.count() != len(unique_ids):
+            return error_response(
+                "INVALID_PARAMS",
+                "some ids are missing or not visible under current filters",
+                400,
+            )
+
+        updated = queryset.update(refresh_interval_seconds=seconds)
+
+        log_operation(
+            actor=request.user,
+            action="UPDATE",
+            target_type=self.target_type,
+            target_id="bulk",
+            target_label=f"bulk refresh interval -> {seconds}s ({updated} rows)",
+            request=request,
+            change_summary={"refreshIntervalSeconds": seconds, "updatedCount": updated, "ids": list(unique_ids)},
+        )
+        return success_response(
+            "bulk refresh interval updated",
+            {"updatedCount": updated, "refreshIntervalSeconds": seconds},
+        )
+
 
 class MaterialViewSet(AdminApiViewSet):
     queryset = Material.objects.all()
@@ -477,6 +654,57 @@ class ScreenPageBindingViewSet(AdminApiViewSet):
     exact_filter_fields = ["screen_key"]
     ordering_fields = ["id", "screen_key", "page_key", "is_enabled", "created_at", "updated_at"]
     default_ordering = ["screen_key", "page_key"]
+
+    @action(detail=False, methods=["post"], url_path="bulk-set-enabled")
+    def bulk_set_enabled(self, request):
+        """按勾选 id 批量设置是否启用；查询参数与列表一致。"""
+        payload = request.data or {}
+        ids = payload.get("ids")
+        if not isinstance(ids, list) or len(ids) == 0:
+            return error_response("INVALID_PARAMS", "ids must be a non-empty list", 400)
+        if len(ids) > 200:
+            return error_response("INVALID_PARAMS", "batch limited to 200 items", 400)
+
+        raw_enabled = payload.get("isEnabled")
+        if raw_enabled is None:
+            return error_response("INVALID_PARAMS", "isEnabled is required", 400)
+        if isinstance(raw_enabled, bool):
+            enabled = raw_enabled
+        elif raw_enabled in (1, "1", "true", "True"):
+            enabled = True
+        elif raw_enabled in (0, "0", "false", "False"):
+            enabled = False
+        else:
+            return error_response("INVALID_PARAMS", "isEnabled must be a boolean", 400)
+
+        try:
+            unique_ids = {int(pk) for pk in ids}
+        except (TypeError, ValueError):
+            return error_response("INVALID_PARAMS", "ids must be integers", 400)
+
+        queryset = self.get_queryset().filter(pk__in=unique_ids)
+        if queryset.count() != len(unique_ids):
+            return error_response(
+                "INVALID_PARAMS",
+                "some ids are missing or not visible under current filters",
+                400,
+            )
+
+        updated = queryset.update(is_enabled=enabled)
+
+        log_operation(
+            actor=request.user,
+            action="UPDATE",
+            target_type=self.target_type,
+            target_id="bulk",
+            target_label=f"bulk set enabled -> {enabled} ({updated} rows)",
+            request=request,
+            change_summary={"isEnabled": enabled, "updatedCount": updated, "ids": list(unique_ids)},
+        )
+        return success_response(
+            "bulk set enabled updated",
+            {"updatedCount": updated, "isEnabled": enabled},
+        )
 
 
 class DataSourceHealthSnapshotViewSet(viewsets.ReadOnlyModelViewSet):

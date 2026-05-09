@@ -1,4 +1,4 @@
-export function ResourceQueryBar({ queryFields, queryState, relatedOptions, onChange, onSearch, onReset, disabled }) {
+export function ResourceQueryBar({ queryFields, queryState, relatedOptions, onChange, onSearch, onReset, disabled, queryActionsPrefix }) {
   if (!queryFields || !queryFields.length) {
     return null;
   }
@@ -66,6 +66,7 @@ export function ResourceQueryBar({ queryFields, queryState, relatedOptions, onCh
     <div className="resource-query-bar">
       <div className="resource-query-grid">{queryFields.map(renderQueryField)}</div>
       <div className="resource-query-actions">
+        {queryActionsPrefix}
         <button disabled={disabled} onClick={onSearch} type="button">
           查询
         </button>

@@ -962,6 +962,7 @@ html[data-theme="dark"] {
 
 .resource-body--single {
   grid-template-columns: minmax(0, 1fr);
+  overflow: visible;
 }
 
 .resource-section {
@@ -976,6 +977,7 @@ html[data-theme="dark"] {
 
 .resource-section:first-child {
   border-right: 1px solid var(--adm-border-2);
+  overflow: visible;
 }
 
 .resource-section--editor {
@@ -987,7 +989,7 @@ html[data-theme="dark"] {
   flex: 1;
   flex-direction: column;
   min-height: 0;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .table-panel-scroll {
@@ -1006,7 +1008,10 @@ html[data-theme="dark"] {
   flex-wrap: wrap;
   gap: 12px;
   justify-content: space-between;
+  overflow: visible;
   padding: 12px 14px;
+  position: relative;
+  z-index: 2;
 }
 
 .resource-query-grid {
@@ -1040,7 +1045,57 @@ html[data-theme="dark"] {
   padding: 6px 10px;
 }
 
+.bulk-apply-toolbar {
+  align-items: flex-end;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.bulk-apply-toolbar .query-field--compact {
+  min-width: 108px;
+}
+
+.bulk-set-button-wrap {
+  align-items: flex-end;
+  display: inline-flex;
+  position: relative;
+}
+
+.bulk-set-button-wrap--hint {
+  cursor: help;
+}
+
+.bulk-set-tooltip {
+  background: var(--adm-bg-panel);
+  border: 1px solid var(--adm-border-4);
+  border-radius: 6px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+  color: var(--adm-text-2);
+  font-size: 0.72rem;
+  font-weight: 510;
+  left: 0;
+  line-height: 1.35;
+  margin: 0 0 6px;
+  max-width: 220px;
+  opacity: 0;
+  padding: 6px 10px;
+  pointer-events: none;
+  position: absolute;
+  bottom: 100%;
+  transition: opacity 0.12s ease;
+  visibility: hidden;
+  white-space: normal;
+  z-index: 30;
+}
+
+.bulk-set-button-wrap--hint:hover .bulk-set-tooltip {
+  opacity: 1;
+  visibility: visible;
+}
+
 .resource-query-actions {
+  align-items: flex-end;
   display: flex;
   flex-shrink: 0;
   gap: 8px;
@@ -1048,13 +1103,15 @@ html[data-theme="dark"] {
 
 .resource-query-actions button {
   background: var(--adm-accent);
-  border: none;
+  border: 1px solid transparent;
   border-radius: 6px;
+  box-sizing: border-box;
   color: #fff;
   cursor: pointer;
   font-size: 0.78rem;
   font-weight: 510;
-  min-height: 34px;
+  height: 36px;
+  min-height: 36px;
   padding: 0 14px;
 }
 

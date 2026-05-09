@@ -133,6 +133,13 @@ const DATA_SOURCE_BASE_FIELDS = [
   { key: "name", label: "名称", type: "text", required: true, defaultValue: "" },
   { key: "deviceIds", label: "绑定设备", type: "resourceMultiSelect", resource: "devices", allowBlank: true, defaultValue: [] },
   { key: "isEnabled", label: "启用", type: "checkbox", defaultValue: true },
+  {
+    key: "refreshIntervalSeconds",
+    label: "轮询间隔（秒）",
+    type: "integer",
+    required: true,
+    defaultValue: 300,
+  },
 ];
 
 const DATA_SOURCE_BASE_QUERY_FIELDS = [
@@ -145,6 +152,7 @@ const DATA_SOURCE_BASE_COLUMNS = [
   { key: "name", label: "名称" },
   { key: "boundDevices", label: "绑定设备", cellFormat: "resourceLinks", resource: "devices" },
   { key: "isEnabled", label: "启用" },
+  { key: "refreshIntervalSeconds", label: "轮询(s)" },
 ];
 
 const DATA_SOURCE_TYPE_FIELDS = {
@@ -217,13 +225,22 @@ const DATA_SOURCE_TYPE_LABELS = {
   repair: "报修系统",
 };
 
+/** 列表批量设置轮询间隔：与后端 bulk-refresh-interval + 当前 source_type 筛选一致 */
+const DATA_SOURCE_BULK_REFRESH_TOOLBAR = {
+  opcua: { inputLabel: "轮询时间（秒）", toastName: "OPC UA" },
+  modbus_tcp: { inputLabel: "轮询(s)", toastName: "Modbus TCP" },
+  sap_rfc: { inputLabel: "轮询(s)", toastName: "SAP RFC" },
+  database: { inputLabel: "轮询(s)", toastName: "数据库" },
+  repair: { inputLabel: "轮询(s)", toastName: "报修系统" },
+};
+
 function buildDataSourceResources() {
   const result = {};
   for (const sourceType of Object.keys(DATA_SOURCE_TYPE_FIELDS)) {
     const label = DATA_SOURCE_TYPE_LABELS[sourceType];
     const customFields = DATA_SOURCE_TYPE_FIELDS[sourceType];
     const resourceKey = dataSourceResourceKey(sourceType);
-    result[resourceKey] = {
+    const resource = {
       label,
       itemLabel: `${label} 数据源`,
       endpoint: "/api/admin/data-source-configs",
@@ -240,6 +257,22 @@ function buildDataSourceResources() {
         ...RESERVED_FIELDS,
       ],
     };
+    const bulkCfg = DATA_SOURCE_BULK_REFRESH_TOOLBAR[sourceType];
+    if (bulkCfg) {
+      const toastName = bulkCfg.toastName;
+      resource.bulkApplyToolbar = {
+        apiPath: "bulk-refresh-interval",
+        valueKey: "refreshIntervalSeconds",
+        label: bulkCfg.inputLabel,
+        defaultInput: "300",
+        min: 5,
+        max: 86400,
+        successMessage: (count, seconds) =>
+          `已更新 ${count} 条 ${toastName} 数据源的轮询间隔为 ${seconds} 秒。`,
+        errorFallback: "批量设置轮询间隔失败，请稍后重试。",
+      };
+    }
+    result[resourceKey] = resource;
   }
   return result;
 }
@@ -500,6 +533,16 @@ export const resourceDefinitions = {
     itemLabel: "屏幕配置",
     useModalForm: true,
     wideModal: true,
+    bulkApplyToolbar: {
+      apiPath: "bulk-rotation-interval",
+      valueKey: "rotationIntervalSeconds",
+      label: "轮播时长（秒）",
+      defaultInput: "60",
+      min: 5,
+      max: 86400,
+      successMessage: (count, seconds) => `已更新 ${count} 条屏幕配置的轮播时长为 ${seconds} 秒。`,
+      errorFallback: "批量设置轮播时长失败，请稍后重试。",
+    },
     relatedResources: ["screenPageBindings"],
     columns: [
       { key: "areaName", label: "区域" },
@@ -562,6 +605,20 @@ export const resourceDefinitions = {
     endpoint: "/api/admin/screen-page-bindings",
     itemLabel: "子页面",
     useModalForm: true,
+    bulkApplyToolbar: {
+      apiPath: "bulk-set-enabled",
+      inputKind: "booleanSelect",
+      valueKey: "isEnabled",
+      label: "启用",
+      defaultInput: "true",
+      selectOptions: [
+        { value: "true", label: "启用" },
+        { value: "false", label: "停用" },
+      ],
+      successMessage: (count, enabled) =>
+        `已批量更新 ${count} 条子页面绑定为「${enabled ? "启用" : "停用"}」。`,
+      errorFallback: "批量设置启用状态失败，请稍后重试。",
+    },
     columns: [
       { key: "pageKeyLabel", label: "子页面" },
       { key: "screenKey", label: "屏幕", options: SCREEN_KEY_OPTIONS },
@@ -677,6 +734,31 @@ export const resourceDefinitions = {
     endpoint: "/api/admin/runtime-parameter-configs",
     itemLabel: "运行参数",
     useModalForm: true,
+    bulkApplyToolbar: {
+      apiPath: "bulk-runtime-fields",
+      fields: [
+        {
+          key: "singleDayEffectiveWorkHours",
+          label: "日有效工时",
+          kind: "decimal",
+          defaultInput: "16.00",
+          min: 0.01,
+          max: 24,
+          step: "0.01",
+        },
+        {
+          key: "ganttWindowDays",
+          label: "甘特窗口天数",
+          kind: "integer",
+          defaultInput: "30",
+          min: 1,
+          max: 36500,
+          step: "1",
+        },
+      ],
+      successMessage: (count) => `已批量更新 ${count} 条运行参数配置的日有效工时与甘特窗口天数。`,
+      errorFallback: "批量设置失败，请稍后重试。",
+    },
     columns: [
       { key: "configKey", label: "配置键" },
       { key: "singleDayEffectiveWorkHours", label: "日有效工时" },

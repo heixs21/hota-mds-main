@@ -19,6 +19,24 @@ import { ResourceQueryBar } from "./ResourceQueryBar.jsx";
 import { buildPayloadFromForm } from "./resourcePayload.js";
 import { DeviceDetailDialog, HistoryDialog } from "./system/AdminDialogs.jsx";
 
+function buildListFilterQueryString(queryState, resourceDefinition) {
+  const params = new URLSearchParams();
+  if (queryState) {
+    Object.entries(queryState).forEach(([key, value]) => {
+      const normalized = typeof value === "string" ? value.trim() : value;
+      if (normalized !== "" && normalized !== null && normalized !== undefined) {
+        params.set(key, String(normalized));
+      }
+    });
+  }
+  if (resourceDefinition.fixedListParams) {
+    Object.entries(resourceDefinition.fixedListParams).forEach(([key, value]) => {
+      params.set(key, String(value));
+    });
+  }
+  return params.toString();
+}
+
 export function ResourceEditor({ activeResource, token, onUnauthorized }) {
   const resourceDefinition = resourceDefinitions[activeResource];
   const useModalForm = Boolean(resourceDefinition.useModalForm);
@@ -38,6 +56,9 @@ export function ResourceEditor({ activeResource, token, onUnauthorized }) {
   const [total, setTotal] = useState(0);
   const [queryDraft, setQueryDraft] = useState(createEmptyQuery(resourceDefinition));
   const [queryApplied, setQueryApplied] = useState(createEmptyQuery(resourceDefinition));
+  const [bulkToolbarInput, setBulkToolbarInput] = useState("");
+  const [bulkToolbarMulti, setBulkToolbarMulti] = useState({});
+  const [isBulkRefreshing, setIsBulkRefreshing] = useState(false);
   const [checkedIds, setCheckedIds] = useState(new Set());
   const [modalState, setModalState] = useState(null);
   const [historyTarget, setHistoryTarget] = useState(null);
@@ -157,6 +178,20 @@ export function ResourceEditor({ activeResource, token, onUnauthorized }) {
       const initialQuery = createEmptyQuery(resourceDefinition);
       setQueryDraft(initialQuery);
       setQueryApplied(initialQuery);
+      const btInit = resourceDefinition.bulkApplyToolbar;
+      if (btInit?.fields?.length) {
+        const initialMulti = {};
+        for (const field of btInit.fields) {
+          initialMulti[field.key] = field.defaultInput ?? "";
+        }
+        setBulkToolbarMulti(initialMulti);
+        setBulkToolbarInput("");
+      } else {
+        setBulkToolbarMulti({});
+        setBulkToolbarInput(
+          btInit?.inputKind === "booleanSelect" ? btInit?.defaultInput ?? "true" : btInit?.defaultInput ?? "",
+        );
+      }
 
       try {
         const listPromise = apiRequest(buildResourceListPath(1, pageSize, initialQuery), { token });
@@ -200,6 +235,54 @@ export function ResourceEditor({ activeResource, token, onUnauthorized }) {
       cancelled = true;
     };
   }, [resourceDefinition, resourceDependencies, token, onUnauthorized, dismissToast, showToast, buildResourceListPath, fetchAllItems, pageSize]);
+
+  useEffect(() => {
+    const bt = resourceDefinition.bulkApplyToolbar;
+    if (!bt || items.length === 0) {
+      return;
+    }
+    if (bt.fields?.length) {
+      const firstRow = items[0];
+      const keys = bt.fields.map((f) => f.key);
+      const allSame = keys.every((key) => items.every((item) => item[key] === firstRow[key]));
+      if (!allSame) {
+        return;
+      }
+      const nextMulti = {};
+      for (const field of bt.fields) {
+        const v = firstRow[field.key];
+        nextMulti[field.key] = v === undefined || v === null ? field.defaultInput ?? "" : String(v);
+      }
+      setBulkToolbarMulti(nextMulti);
+      return;
+    }
+    if (bt.inputKind === "booleanSelect" && bt.valueKey) {
+      const key = bt.valueKey;
+      const first = items[0][key];
+      const norm = first === true || first === "true" || first === 1;
+      const allSame = items.every((item) => {
+        const v = item[key];
+        const n = v === true || v === "true" || v === 1;
+        return n === norm;
+      });
+      if (allSame) {
+        setBulkToolbarInput(norm ? "true" : "false");
+      }
+      return;
+    }
+    if (!bt.valueKey) {
+      return;
+    }
+    const key = bt.valueKey;
+    const first = items[0][key];
+    if (first === undefined || first === null) {
+      return;
+    }
+    const allSame = items.every((item) => item[key] === first);
+    if (allSame) {
+      setBulkToolbarInput(String(first));
+    }
+  }, [items, resourceDefinition.bulkApplyToolbar]);
 
   function handleSelectItem(item) {
     setSelectedItem(item);
@@ -542,6 +625,92 @@ export function ResourceEditor({ activeResource, token, onUnauthorized }) {
     }
   }
 
+  async function handleBulkToolbarApply() {
+    const bt = resourceDefinition.bulkApplyToolbar;
+    if (!bt) {
+      return;
+    }
+    if (checkedIds.size === 0) {
+      return;
+    }
+
+    const qs = buildListFilterQueryString(queryApplied, resourceDefinition);
+    const path = `${resourceDefinition.endpoint}/${bt.apiPath}${qs ? `?${qs}` : ""}`;
+
+    let body;
+    let singleFieldPayload = null;
+
+    if (bt.fields?.length) {
+      body = { ids: [...checkedIds] };
+      for (const field of bt.fields) {
+        const raw = bulkToolbarMulti[field.key] ?? "";
+        const trimmed = String(raw).trim();
+        if (field.kind === "decimal") {
+          const n = Number.parseFloat(trimmed);
+          if (Number.isNaN(n) || n < field.min || n > field.max) {
+            showToast(`${field.label}须为 ${field.min}～${field.max} 之间的数值。`, { variant: "error" });
+            return;
+          }
+          body[field.key] = n;
+        } else {
+          const n = Number.parseInt(trimmed, 10);
+          if (Number.isNaN(n) || n < field.min || n > field.max) {
+            showToast(`${field.label}须为 ${field.min}～${field.max} 之间的整数。`, { variant: "error" });
+            return;
+          }
+          body[field.key] = n;
+        }
+      }
+    } else if (bt.inputKind === "booleanSelect") {
+      const raw = String(bulkToolbarInput).trim();
+      let boolVal;
+      if (raw === "true") {
+        boolVal = true;
+      } else if (raw === "false") {
+        boolVal = false;
+      } else {
+        showToast("请选择启用状态。", { variant: "error" });
+        return;
+      }
+      body = { ids: [...checkedIds], [bt.valueKey]: boolVal };
+      singleFieldPayload = boolVal;
+    } else {
+      const parsed = Number.parseInt(String(bulkToolbarInput).trim(), 10);
+      if (Number.isNaN(parsed) || parsed < bt.min || parsed > bt.max) {
+        showToast(`${bt.label}须为 ${bt.min}～${bt.max} 之间的整数。`, { variant: "error" });
+        return;
+      }
+      body = { ids: [...checkedIds], [bt.valueKey]: parsed };
+      singleFieldPayload = parsed;
+    }
+
+    setIsBulkRefreshing(true);
+    try {
+      const response = await apiRequest(path, {
+        method: "POST",
+        token,
+        body,
+      });
+      const updatedCount = response.data?.updatedCount ?? 0;
+      await reloadCurrentResource(null, page, pageSize, queryApplied);
+      if (bt.fields?.length) {
+        showToast(bt.successMessage(updatedCount), { variant: "success" });
+      } else {
+        showToast(bt.successMessage(updatedCount, singleFieldPayload), { variant: "success" });
+      }
+    } catch (error) {
+      if (error.status === 401) {
+        onUnauthorized();
+        return;
+      }
+      showToast(humanizeAdminApiError(error, resourceDefinition.fields, { fallback: bt.errorFallback }), {
+        variant: httpErrorToastVariant(error.status),
+      });
+    } finally {
+      setIsBulkRefreshing(false);
+    }
+  }
+
   async function handleOpenResourceItem(resourceKey, itemId) {
     if (!resourceKey || !itemId) {
       return;
@@ -606,6 +775,81 @@ export function ResourceEditor({ activeResource, token, onUnauthorized }) {
               onChange={handleQueryFieldChange}
               onReset={handleResetQuery}
               onSearch={handleSearch}
+              queryActionsPrefix={
+                resourceDefinition.bulkApplyToolbar ? (
+                  <div className="bulk-apply-toolbar">
+                    {resourceDefinition.bulkApplyToolbar.fields?.length ? (
+                      resourceDefinition.bulkApplyToolbar.fields.map((field) => (
+                        <label className="query-field query-field--compact" key={field.key}>
+                          <span>{field.label}</span>
+                          <input
+                            aria-label={field.label}
+                            disabled={isLoading || isBulkRefreshing}
+                            max={field.max}
+                            min={field.min}
+                            onChange={(event) =>
+                              setBulkToolbarMulti((prev) => ({
+                                ...prev,
+                                [field.key]: event.target.value,
+                              }))
+                            }
+                            step={field.step}
+                            type="number"
+                            value={bulkToolbarMulti[field.key] ?? ""}
+                          />
+                        </label>
+                      ))
+                    ) : resourceDefinition.bulkApplyToolbar.inputKind === "booleanSelect" ? (
+                      <label className="query-field query-field--compact">
+                        <span>{resourceDefinition.bulkApplyToolbar.label}</span>
+                        <select
+                          aria-label={resourceDefinition.bulkApplyToolbar.label}
+                          disabled={isLoading || isBulkRefreshing}
+                          onChange={(event) => setBulkToolbarInput(event.target.value)}
+                          value={bulkToolbarInput}
+                        >
+                          {(resourceDefinition.bulkApplyToolbar.selectOptions ?? []).map((opt) => (
+                            <option key={opt.value} value={opt.value}>
+                              {opt.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    ) : (
+                      <label className="query-field query-field--compact">
+                        <span>{resourceDefinition.bulkApplyToolbar.label}</span>
+                        <input
+                          aria-label={resourceDefinition.bulkApplyToolbar.label}
+                          disabled={isLoading || isBulkRefreshing}
+                          max={resourceDefinition.bulkApplyToolbar.max}
+                          min={resourceDefinition.bulkApplyToolbar.min}
+                          onChange={(event) => setBulkToolbarInput(event.target.value)}
+                          step={1}
+                          type="number"
+                          value={bulkToolbarInput}
+                        />
+                      </label>
+                    )}
+                    <span
+                      className={`bulk-set-button-wrap${checkedIds.size === 0 ? " bulk-set-button-wrap--hint" : ""}`}
+                    >
+                      {checkedIds.size === 0 ? (
+                        <span className="bulk-set-tooltip" role="tooltip">
+                          先勾选需要批量设置的记录
+                        </span>
+                      ) : null}
+                      <button
+                        className="ghost-button"
+                        disabled={isLoading || isBulkRefreshing || checkedIds.size === 0}
+                        onClick={handleBulkToolbarApply}
+                        type="button"
+                      >
+                        {isBulkRefreshing ? "设置中..." : "批量设置"}
+                      </button>
+                    </span>
+                  </div>
+                ) : null
+              }
               queryFields={resourceDefinition.queryFields ?? []}
               queryState={queryDraft}
               relatedOptions={relatedOptions}
