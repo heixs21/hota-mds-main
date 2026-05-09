@@ -2,7 +2,7 @@ from django.contrib import admin
 from django.urls import include, path
 
 from accounts.views import admin_login, admin_logout, admin_me
-from backoffice.views import LeftScreenDisplayView, RightScreenDisplayView
+from backoffice.views import EnergyDashboardView, LeftScreenDisplayView, RightScreenDisplayView
 from backoffice.urls import urlpatterns as backoffice_urlpatterns
 from health.views import health_check
 
@@ -20,6 +20,8 @@ urlpatterns = [
     path("api/screens/<str:area_code>/left/", LeftScreenDisplayView.as_view(), name="screen-left-slash"),
     path("api/screens/<str:area_code>/right", RightScreenDisplayView.as_view(), name="screen-right"),
     path("api/screens/<str:area_code>/right/", RightScreenDisplayView.as_view(), name="screen-right-slash"),
+    path("api/energy-dashboard", EnergyDashboardView.as_view(), name="energy-dashboard"),
+    path("api/energy-dashboard/", EnergyDashboardView.as_view(), name="energy-dashboard-slash"),
     path("api/health", health_check, name="api-health"),
     path("api/health/", health_check, name="api-health-slash"),
 ]

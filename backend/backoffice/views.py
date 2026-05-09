@@ -1,5 +1,6 @@
 from decimal import Decimal, InvalidOperation
 
+from django.conf import settings
 from django.db.models import Q
 from django.utils import timezone
 from django.utils.dateparse import parse_date, parse_datetime
@@ -12,6 +13,7 @@ from hota_mds.responses import success_response, error_response
 
 from .audit import log_operation
 from .display_services import ensure_mock_snapshots, get_screen_payload
+from .energy_dashboard_services import serve_energy_dashboard
 from .models import (
     Area,
     CodeMapping,
@@ -20,6 +22,7 @@ from .models import (
     Device,
     Employee,
     DisplayContentConfig,
+    EnergyEquipmentCatalog,
     Material,
     OpcUaHistorySample,
     OperationLog,
@@ -651,9 +654,12 @@ class ScreenPageBindingViewSet(AdminApiViewSet):
     target_type = "screen_page_binding"
     search_fields = ["page_key", "notes"]
     boolean_filter_fields = ["is_enabled"]
-    exact_filter_fields = ["screen_key"]
-    ordering_fields = ["id", "screen_key", "page_key", "is_enabled", "created_at", "updated_at"]
-    default_ordering = ["screen_key", "page_key"]
+    exact_filter_fields = ["screen_key", "area_id"]
+    ordering_fields = ["id", "area_id", "screen_key", "page_key", "is_enabled", "created_at", "updated_at"]
+    default_ordering = ["area_id", "screen_key", "page_key"]
+
+    def get_queryset(self):
+        return super().get_queryset().select_related("area")
 
     @action(detail=False, methods=["post"], url_path="bulk-set-enabled")
     def bulk_set_enabled(self, request):
@@ -780,6 +786,55 @@ class OperationLogViewSet(viewsets.ReadOnlyModelViewSet):
         instance = self.get_object()
         serializer = self.get_serializer(instance)
         return success_response("detail loaded", serializer.data)
+
+
+class EnergyEquipmentOptionsView(APIView):
+    """后台能耗表计选项：读本地 EnergyEquipmentCatalog（由定时任务 sync 写入）。"""
+
+    authentication_classes = [AdminTokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, *args, **kwargs):
+        raw = request.query_params.get("data_source_id")
+        try:
+            ds_id = int(raw)
+        except (TypeError, ValueError):
+            return error_response("INVALID_PARAMS", "缺少或非法的 data_source_id", 400)
+        if ds_id <= 0:
+            return error_response("INVALID_PARAMS", "缺少或非法的 data_source_id", 400)
+        rows = (
+            EnergyEquipmentCatalog.objects.filter(data_source_id=ds_id)
+            .order_by("display_name", "equipment_id")[:6000]
+        )
+        opts = [{"id": r.equipment_id, "label": r.display_name or r.equipment_id} for r in rows]
+        return success_response("energy equipment options loaded", {"options": opts})
+
+
+class EnergyDashboardView(APIView):
+    """能耗看板：默认读本地 EnergyDashboardSnapshot；forceRefresh 直连外部库写回快照。
+    设置 ENERGY_DASHBOARD_ALLOW_LIVE_FALLBACK=false 可无缓存时禁止兜底查询。"""
+
+    permission_classes = [AllowAny]
+
+    def post(self, request, *args, **kwargs):
+        raw = request.data if isinstance(request.data, dict) else {}
+        ids_raw = raw.get("dataSourceIds") or raw.get("data_source_ids") or []
+        clean_ids: list[int] = []
+        for x in ids_raw:
+            try:
+                clean_ids.append(int(x))
+            except (TypeError, ValueError):
+                continue
+        clean_ids = [i for i in clean_ids if i > 0]
+        allow_live = getattr(settings, "ENERGY_DASHBOARD_ALLOW_LIVE_FALLBACK", True)
+        result = serve_energy_dashboard(clean_ids, raw, allow_live_fallback=allow_live)
+        if not result.get("ok"):
+            return error_response(
+                "ENERGY_DASHBOARD_FAILED",
+                result.get("error") or "能耗看板查询失败",
+                400,
+            )
+        return success_response("energy dashboard loaded", result)
 
 
 class ScreenDisplayView(APIView):

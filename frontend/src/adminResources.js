@@ -620,17 +620,27 @@ export const resourceDefinitions = {
       errorFallback: "批量设置启用状态失败，请稍后重试。",
     },
     columns: [
+      { key: "bindingScopeLabel", label: "屏幕（区域）" },
       { key: "pageKeyLabel", label: "子页面" },
-      { key: "screenKey", label: "屏幕", options: SCREEN_KEY_OPTIONS },
       { key: "bindingSourceType", label: "数据源类型", options: DATA_SOURCE_BINDING_CATEGORY_OPTIONS },
       { key: "dataSourceIds", label: "数据源", cellFormat: "idCount" },
+      { key: "energyEquipmentIds", label: "能耗表计", cellFormat: "idCount" },
       { key: "isEnabled", label: "启用" },
     ],
     queryFields: [
+      { key: "area_id", label: "区域", type: "resourceSelect", resource: "areas", allowBlank: true },
       { key: "screen_key", label: "屏幕", type: "select", options: SCREEN_KEY_OPTIONS },
       { key: "is_enabled", label: "启用状态", type: "select", options: ACTIVE_STATUS_OPTIONS },
     ],
     fields: [
+      {
+        key: "areaId",
+        label: "所属区域",
+        type: "resourceSelect",
+        resource: "areas",
+        allowBlank: true,
+        defaultValue: "",
+      },
       {
         key: "pageKey",
         label: "子页面",
@@ -641,7 +651,7 @@ export const resourceDefinitions = {
       },
       {
         key: "screenKey",
-        label: "屏幕",
+        label: "左/右屏",
         type: "select",
         required: true,
         defaultValue: "left",
@@ -662,6 +672,14 @@ export const resourceDefinitions = {
         filterByField: "bindingSourceType",
         filterOptionKey: "sourceType",
         defaultValue: [],
+      },
+      {
+        key: "energyEquipmentIds",
+        label: "能耗表计（platform_equipment / p_e_name）",
+        type: "energyDatabaseEquipmentMulti",
+        dataSourceField: "dataSourceIds",
+        defaultValue: [],
+        visibleWhen: { field: "pageKey", value: "energy" },
       },
       { key: "isEnabled", label: "启用", type: "checkbox", defaultValue: true },
       { key: "notes", label: "备注", type: "textarea", defaultValue: "" },
@@ -818,7 +836,11 @@ export function createEmptyForm(resourceDefinition) {
       nextState[field.key] = Object.keys(rawDefault).length === 0 && field.omitIfBlank ? "" : stringifyJson(rawDefault);
     } else if (field.type === "checkbox") {
       nextState[field.key] = Boolean(field.defaultValue);
-    } else if (field.type === "resourceMultiSelect" || field.type === "resourceMultiSelectFiltered") {
+    } else if (
+      field.type === "resourceMultiSelect" ||
+      field.type === "resourceMultiSelectFiltered" ||
+      field.type === "energyDatabaseEquipmentMulti"
+    ) {
       nextState[field.key] = Array.isArray(field.defaultValue) ? [...field.defaultValue] : [];
     } else {
       nextState[field.key] = field.defaultValue ?? "";
@@ -866,6 +888,12 @@ export function createFormFromItem(resourceDefinition, item) {
       }
     } else if (field.type === "checkbox") {
       nextState[field.key] = Boolean(rawValue);
+    } else if (field.type === "energyDatabaseEquipmentMulti") {
+      if (Array.isArray(rawValue)) {
+        nextState[field.key] = rawValue.map((v) => String(v)).filter(Boolean);
+      } else {
+        nextState[field.key] = [];
+      }
     } else if (field.type === "resourceMultiSelect" || field.type === "resourceMultiSelectFiltered") {
       if (Array.isArray(rawValue)) {
         nextState[field.key] = rawValue
@@ -902,6 +930,12 @@ export function parseFieldValue(field, rawValue, fullForm) {
   }
   if (field.type === "resourceSelect") {
     return rawValue === "" ? null : Number(rawValue);
+  }
+  if (field.type === "energyDatabaseEquipmentMulti") {
+    if (!Array.isArray(rawValue)) {
+      return [];
+    }
+    return rawValue.map((value) => String(value)).filter(Boolean);
   }
   if (field.type === "resourceMultiSelect" || field.type === "resourceMultiSelectFiltered") {
     if (!Array.isArray(rawValue)) {

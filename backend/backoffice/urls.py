@@ -1,3 +1,4 @@
+from django.urls import path
 from rest_framework.routers import DefaultRouter
 
 from .views import (
@@ -8,6 +9,7 @@ from .views import (
     DeviceViewSet,
     EmployeeViewSet,
     DisplayContentConfigViewSet,
+    EnergyEquipmentOptionsView,
     MaterialViewSet,
     OperationLogViewSet,
     OrderViewSet,
@@ -36,4 +38,6 @@ router.register("data-source-configs", DataSourceConfigViewSet, basename="admin-
 router.register("data-source-healths", DataSourceHealthSnapshotViewSet, basename="admin-data-source-health")
 router.register("operation-logs", OperationLogViewSet, basename="admin-operation-log")
 
-urlpatterns = router.urls
+urlpatterns = [
+    path("energy-equipment-options", EnergyEquipmentOptionsView.as_view()),
+] + router.urls

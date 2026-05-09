@@ -92,6 +92,11 @@ USE_TZ = True
 STATIC_URL = "static/"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
+# 无本地快照时是否允许直连外部能耗库（False 则仅返回缓存，需定时任务 sync_energy_dashboard_snapshots）
+ENERGY_DASHBOARD_ALLOW_LIVE_FALLBACK = os.getenv(
+    "ENERGY_DASHBOARD_ALLOW_LIVE_FALLBACK", "true"
+).lower() in ("1", "true", "yes")
+
 REST_FRAMEWORK = {
     "DEFAULT_RENDERER_CLASSES": [
         "rest_framework.renderers.JSONRenderer",

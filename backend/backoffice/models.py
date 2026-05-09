@@ -351,6 +351,46 @@ class EnergySnapshot(TimestampedModel):
         return self.snapshot_key
 
 
+class EnergyDashboardSnapshot(TimestampedModel):
+    """能耗看板接口聚合结果缓存（按数据源 + 筛选 + 刷新粒度去重，保留最后一次成功结果）。"""
+
+    cache_key = models.CharField(max_length=64, unique=True, db_index=True)
+    data_source_ids = models.JSONField(default=list)
+    refresh_scope = models.CharField(max_length=32, blank=True, default="")
+    filters = models.JSONField(default=dict, blank=True)
+    snapshot_data = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ["-updated_at"]
+
+    def __str__(self):
+        return f"{self.cache_key[:16]}..."
+
+
+class EnergyEquipmentCatalog(TimestampedModel):
+    """能耗库 platform_equipment 在本地库的镜像，供后台勾选表计；由定时任务从数据源同步。"""
+
+    data_source = models.ForeignKey(
+        "DataSourceConfig",
+        on_delete=models.CASCADE,
+        related_name="energy_equipment_catalog",
+    )
+    equipment_id = models.CharField(max_length=64, db_index=True)
+    display_name = models.CharField(max_length=255, blank=True, default="")
+
+    class Meta:
+        ordering = ["display_name", "equipment_id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["data_source", "equipment_id"],
+                name="uniq_energy_equipment_catalog_ds_eid",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.data_source_id}:{self.equipment_id}"
+
+
 class DataSourceHealthSnapshot(TimestampedModel):
     STATUS_HEALTHY = "healthy"
     STATUS_FAILED = "failed"
@@ -576,11 +616,17 @@ class PageModuleSwitch(ReservedFieldsMixin, TimestampedModel):
 
 class ScreenPageBinding(ReservedFieldsMixin, TimestampedModel):
     """
-    全局子页面数据源绑定：每条记录对应一个页面键（如 realtime），记录其所属屏幕及数据源配置。
-    轮播顺序由 ScreenConfig.page_order 控制；区域维度已移除，数据源配置全局共享。
-    binding_source_type + data_source_ids 描述接入的数据源（先选类型再选具体数据源）。
+    子页面数据源绑定：按「区域 + 左/右屏 + page_key」区分。
+    area 为空时为兼容旧数据的兜底绑定；大屏解析时优先使用当前区域的绑定。
     """
 
+    area = models.ForeignKey(
+        Area,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="screen_page_bindings",
+    )
     screen_key = models.CharField(max_length=16, choices=SCREEN_KEY_CHOICES)
     page_key = models.CharField(max_length=64)
     binding_source_type = models.CharField(
@@ -590,17 +636,16 @@ class ScreenPageBinding(ReservedFieldsMixin, TimestampedModel):
         help_text="与 DataSourceConfig.source_type 对齐；表单先选类型再筛选具体数据源",
     )
     data_source_ids = models.JSONField(default=list, blank=True)
+    energy_equipment_ids = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="能耗页：platform_equipment.e_id 列表，对应大屏筛选范围",
+    )
     is_enabled = models.BooleanField(default=True)
     notes = models.TextField(blank=True)
 
     class Meta:
-        ordering = ["screen_key", "page_key"]
-        constraints = [
-            models.UniqueConstraint(
-                fields=["screen_key", "page_key"],
-                name="uniq_screen_page_binding_screen_page",
-            ),
-        ]
+        ordering = ["area_id", "screen_key", "page_key"]
 
     def __str__(self):
         return f"{self.screen_key}:{self.page_key}"

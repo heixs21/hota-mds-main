@@ -1,3 +1,6 @@
+import { useEffect, useState } from "react";
+
+import { ADMIN_TOKEN_STORAGE_KEY, apiRequest } from "../adminApi.js";
 import { ScreenPageTransferField } from "./screen/ScreenPageTransferField.jsx";
 
 function matchesVisibleWhen(field, formState) {
@@ -88,6 +91,10 @@ export function ResourceField({ field, formState, setFormState, relatedOptions }
         </select>
       </label>
     );
+  }
+
+  if (field.type === "energyDatabaseEquipmentMulti") {
+    return <EnergyDatabaseEquipmentMultiField field={field} formState={formState} setFormState={setFormState} />;
   }
 
   if (field.type === "resourceMultiSelectFiltered") {
@@ -197,5 +204,118 @@ export function ResourceField({ field, formState, setFormState, relatedOptions }
         value={value ?? ""}
       />
     </label>
+  );
+}
+
+function EnergyDatabaseEquipmentMultiField({ field, formState, setFormState }) {
+  const value = formState[field.key];
+  const dsField = field.dataSourceField ?? "dataSourceIds";
+  const dsRaw = formState[dsField];
+  const bindingType = String(formState.bindingSourceType ?? "");
+  const firstDs =
+    Array.isArray(dsRaw) && dsRaw.length > 0 ? dsRaw.map((x) => Number(x)).find((n) => Number.isInteger(n) && n > 0) : null;
+
+  const [options, setOptions] = useState([]);
+  const [loadErr, setLoadErr] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (bindingType !== "database" || !firstDs) {
+      setOptions([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      setLoadErr("");
+      try {
+        const token =
+          window.sessionStorage.getItem(ADMIN_TOKEN_STORAGE_KEY) ??
+          window.localStorage.getItem(ADMIN_TOKEN_STORAGE_KEY) ??
+          "";
+        const res = await apiRequest(`/api/admin/energy-equipment-options?data_source_id=${firstDs}`, { token });
+        const opts = res?.data?.options ?? [];
+        if (!cancelled) {
+          setOptions(Array.isArray(opts) ? opts : []);
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setLoadErr(e.message || String(e));
+          setOptions([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [bindingType, firstDs]);
+
+  const selectedSet = new Set(Array.isArray(value) ? value.map(String) : []);
+
+  function toggleOption(optionId, checked) {
+    const next = new Set(selectedSet);
+    const key = String(optionId);
+    if (checked) {
+      next.add(key);
+    } else {
+      next.delete(key);
+    }
+    setFormState((current) => ({
+      ...current,
+      [field.key]: [...next],
+    }));
+  }
+
+  if (bindingType !== "database") {
+    return (
+      <div className="field field--static-hint">
+        <span className="field-label-static">{field.label}</span>
+        <p className="field-hint field-hint--admin">请先将「数据源类型」设为数据库，再勾选 platform_equipment 表计。</p>
+      </div>
+    );
+  }
+
+  if (!firstDs) {
+    return (
+      <div className="field field--static-hint">
+        <span className="field-label-static">{field.label}</span>
+        <p className="field-hint field-hint--admin">请先在上方选择至少一个能耗数据库数据源。</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="field field--multi-select">
+      <span>{field.label}</span>
+      <p className="field-hint resource-multi-select-hint">
+        选项来自本地库 EnergyEquipmentCatalog（定时任务 sync_energy_dashboard_snapshots 从能耗库同步）；可多选。
+      </p>
+      {loadErr ? <p className="field-hint resource-multi-select-hint">{loadErr}</p> : null}
+      {loading ? <p className="field-hint resource-multi-select-hint">加载设备列表…</p> : null}
+      <div className="resource-multi-select-scroll" role="group" aria-label={field.label}>
+        {loading ? (
+          <div className="resource-multi-select-empty">加载中…</div>
+        ) : options.length === 0 ? (
+          <div className="resource-multi-select-empty">
+            暂无同步数据。请先运行后端定时任务 sync_energy_dashboard_snapshots（或等待下一轮同步）。
+          </div>
+        ) : (
+          options.map((option) => (
+            <label className="resource-multi-select-row" key={option.id}>
+              <input
+                checked={selectedSet.has(String(option.id))}
+                onChange={(event) => toggleOption(option.id, event.target.checked)}
+                type="checkbox"
+              />
+              <span>{option.label}</span>
+            </label>
+          ))
+        )}
+      </div>
+    </div>
   );
 }

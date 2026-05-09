@@ -1,4 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+
+import { EnergyDashboardBoard } from "./EnergyDashboardBoard.jsx";
+import { ScreenCarouselPageContext } from "./screenCarouselContext.jsx";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_PAGE_KEYS = {
@@ -742,7 +745,7 @@ function LeftScreen({ payload, errorMessage, fullscreenState, screenRef }) {
   const pages = useMemo(() => resolveConfiguredPages("left", screen.pageKeys), [screen.pageKeys]);
   const [activePageIndex, setActivePageIndex] = usePageRotation(pages, screen.rotationIntervalSeconds);
   const activeSections = pages[activePageIndex]?.sections ?? [];
-  const visibleSections = useMemo(
+  const visibleSectionsActive = useMemo(
     () => resolveVisibleSections(activeSections, moduleSettings),
     [activeSections, moduleSettings],
   );
@@ -960,11 +963,12 @@ function LeftScreen({ payload, errorMessage, fullscreenState, screenRef }) {
         setAlarmPulseDismissed={setAlarmPulseDismissed}
       />
     ),
-    energyData: <EnergyDataSection key="energyData" energyData={content.energyData ?? {}} />,
+    energyData: <EnergyDashboardBoard key="energyData" bootstrap={content.energyData ?? {}} />,
   };
 
-  const isRealtimeOnlyPage = visibleSections.length === 1 && visibleSections[0] === "deviceRealtimeMonitor";
-  const isEnergyOnlyPage = visibleSections.length === 1 && visibleSections[0] === "energyData";
+  const isRealtimeOnlyPage =
+    visibleSectionsActive.length === 1 && visibleSectionsActive[0] === "deviceRealtimeMonitor";
+  const isEnergyOnlyPage = visibleSectionsActive.length === 1 && visibleSectionsActive[0] === "energyData";
 
   return (
     <main className="screen-shell screen-left" onDoubleClick={fullscreenState.toggleFullscreen} ref={screenRef}>
@@ -989,15 +993,40 @@ function LeftScreen({ payload, errorMessage, fullscreenState, screenRef }) {
       />
 
       <section className={`screen-page screen-grid screen-grid-left${isRealtimeOnlyPage ? " screen-grid-left-realtime" : ""}${isEnergyOnlyPage ? " screen-grid-energy" : ""}`}>
-        {visibleSections.length > 0 ? (
-          visibleSections.map((sectionKey) => sectionNodes[sectionKey]).filter(Boolean)
-        ) : (
+        {pages.length === 0 ? (
           <section className="screen-panel panel-span-12">
-            <SectionEmpty
-              title="当前轮播页没有可展示模块"
-              description="请检查该屏幕的 moduleSettings 或 pageKeys 配置。"
-            />
+            <SectionEmpty title="未配置轮播页面" description="请在左右屏配置中设置 pageKeys。" />
           </section>
+        ) : (
+          pages.map((page, pageIndex) => {
+            const sliceSections = resolveVisibleSections(page.sections ?? [], moduleSettings);
+            const isSliceActive = pageIndex === activePageIndex;
+            return (
+              <ScreenCarouselPageContext.Provider key={page.key} value={{ isActive: isSliceActive }}>
+                <div
+                  className={`screen-page-slice${isSliceActive ? " screen-page-slice--active" : " screen-page-slice--hidden"}`}
+                  aria-hidden={!isSliceActive}
+                >
+                  {sliceSections.length > 0 ? (
+                    sliceSections.map((sectionKey) => {
+                      const node = sectionNodes[sectionKey];
+                      if (!node) return null;
+                      return (
+                        <Fragment key={`${page.key}-${sectionKey}`}>{node}</Fragment>
+                      );
+                    })
+                  ) : (
+                    <section className="screen-panel panel-span-12">
+                      <SectionEmpty
+                        title="当前轮播页没有可展示模块"
+                        description="请检查该屏幕的 moduleSettings 或 pageKeys 配置。"
+                      />
+                    </section>
+                  )}
+                </div>
+              </ScreenCarouselPageContext.Provider>
+            );
+          })
         )}
       </section>
     </main>
@@ -1096,100 +1125,6 @@ function DeviceRealtimeSection({ drm, clock, alarmPulseDismissed, setAlarmPulseD
         {(drm.cards ?? []).length === 0 ? (
           <SectionEmpty title="当前暂无可监控 OPC UA 设备" description="请在数据源配置中绑定设备并配置节点列表（含 TK.MD 数据点）。" />
         ) : null}
-      </div>
-    </section>
-  );
-}
-
-function EnergyDataSection({ energyData }) {
-  const equipmentList = energyData.equipmentList ?? [];
-  const categories = energyData.categories ?? [];
-  const equipScrollRef = useRef(null);
-  const equipScrollActive = equipmentList.length > 0;
-  const equipOverflowing = useOverflowAutoScroll(equipScrollRef, equipScrollActive);
-
-  const formatKwh = (val) => {
-    const n = parseFloat(val);
-    if (isNaN(n)) return "—";
-    if (n >= 10000) return `${(n / 10000).toFixed(2)} 万kWh`;
-    return `${n.toFixed(2)} kWh`;
-  };
-
-  return (
-    <section className="screen-panel panel-span-12 panel-unbounded energy-data-panel" key="energyData">
-      <header className="energy-data-header">
-        <div className="energy-data-header-left">
-          <h2>能耗数据</h2>
-          {energyData.sourceName && <span className="energy-data-source">{energyData.sourceName}</span>}
-        </div>
-        <div className="energy-data-header-kpi">
-          <div className="energy-kpi-card">
-            <span className="energy-kpi-label">今日用电量</span>
-            <strong className="energy-kpi-value accent-teal">{formatKwh(energyData.todayKwh)}</strong>
-          </div>
-          <div className="energy-kpi-card">
-            <span className="energy-kpi-label">本月用电量</span>
-            <strong className="energy-kpi-value accent-blue">{formatKwh(energyData.monthKwh)}</strong>
-          </div>
-        </div>
-      </header>
-
-      {energyData.errorMessage && (
-        <div className="energy-data-error">{energyData.errorMessage}</div>
-      )}
-
-      <div className="energy-data-body">
-        {categories.length > 0 && (
-          <div className="energy-category-block">
-            <h3 className="energy-block-title">分类能耗占比（今日）</h3>
-            <div className="energy-category-list">
-              {categories.map((cat) => (
-                <div className="energy-category-row" key={cat.id}>
-                  <div className="energy-category-meta">
-                    <span className="energy-category-dot" style={{ background: cat.color }} />
-                    <span className="energy-category-name">{cat.label}</span>
-                    <span className="energy-category-kwh">{formatKwh(cat.kwh)}</span>
-                  </div>
-                  <div className="energy-category-bar-track">
-                    <div
-                      className="energy-category-bar-fill"
-                      style={{ width: `${cat.percent}%`, background: cat.color }}
-                    />
-                  </div>
-                  <span className="energy-category-pct">{cat.percent}%</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        <div className="energy-equipment-block">
-          <h3 className="energy-block-title">
-            设备用电明细（今日）
-            <span className="energy-block-subtitle">
-              {`${equipmentList.length} 条记录`}
-              {equipOverflowing ? " · 自动滚动中" : ""}
-            </span>
-          </h3>
-          {equipmentList.length > 0 ? (
-            <div className="energy-equipment-list" ref={equipScrollRef}>
-              {equipmentList.map((eq, i) => (
-                <article className="energy-equipment-item" key={eq.equipmentCode || i}>
-                  <div className="energy-equipment-name">{eq.equipmentName}</div>
-                  <div className="energy-equipment-meta">
-                    <span className="energy-equipment-category">{eq.category}</span>
-                    <span className="energy-equipment-collection">{eq.collectionName}</span>
-                  </div>
-                  <div className="energy-equipment-kwh">{formatKwh(eq.todayKwh)}</div>
-                </article>
-              ))}
-            </div>
-          ) : (
-            <div className="energy-equipment-empty">
-              {energyData.errorMessage ? "数据源异常，暂无记录" : "今日暂无用电记录"}
-            </div>
-          )}
-        </div>
       </div>
     </section>
   );
@@ -1338,17 +1273,18 @@ function RightScreen({ payload, errorMessage, fullscreenState, screenRef }) {
   const pages = useMemo(() => resolveConfiguredPages("right", screen.pageKeys), [screen.pageKeys]);
   const [activePageIndex, setActivePageIndex] = usePageRotation(pages, screen.rotationIntervalSeconds);
   const activeSections = pages[activePageIndex]?.sections ?? [];
-  const visibleSections = useMemo(
+  const visibleSectionsActive = useMemo(
     () => resolveVisibleSections(activeSections, moduleSettings),
     [activeSections, moduleSettings],
   );
 
   const simulationScrollRef = useRef(null);
-  const simulationScrollActive = visibleSections.includes("simulationPlaceholder");
+  const simulationScrollActive = visibleSectionsActive.includes("simulationPlaceholder");
   const simulationOverflowing = useOverflowAutoScroll(simulationScrollRef, simulationScrollActive);
 
-  const isRealtimeOnlyPage = visibleSections.length === 1 && visibleSections[0] === "deviceRealtimeMonitor";
-  const isEnergyOnlyPage = visibleSections.length === 1 && visibleSections[0] === "energyData";
+  const isRealtimeOnlyPage =
+    visibleSectionsActive.length === 1 && visibleSectionsActive[0] === "deviceRealtimeMonitor";
+  const isEnergyOnlyPage = visibleSectionsActive.length === 1 && visibleSectionsActive[0] === "energyData";
 
   const drm = content.deviceRealtimeMonitor ?? {};
   const [alarmPulseDismissed, setAlarmPulseDismissed] = useState(() => new Set());
@@ -1410,7 +1346,7 @@ function RightScreen({ payload, errorMessage, fullscreenState, screenRef }) {
         </div>
       </section>
     ),
-    energyData: <EnergyDataSection key="energyData" energyData={content.energyData ?? {}} />,
+    energyData: <EnergyDashboardBoard key="energyData" bootstrap={content.energyData ?? {}} />,
   };
 
   return (
@@ -1436,15 +1372,40 @@ function RightScreen({ payload, errorMessage, fullscreenState, screenRef }) {
       />
 
       <section className={`screen-page screen-grid screen-grid-right${isRealtimeOnlyPage ? " screen-grid-realtime" : ""}${isEnergyOnlyPage ? " screen-grid-energy" : ""}`}>
-        {visibleSections.length > 0 ? (
-          visibleSections.map((sectionKey) => sectionNodes[sectionKey]).filter(Boolean)
-        ) : (
+        {pages.length === 0 ? (
           <section className="screen-panel panel-span-12">
-            <SectionEmpty
-              title="当前轮播页没有可展示模块"
-              description="请检查该屏幕的 moduleSettings 或 pageKeys 配置。"
-            />
+            <SectionEmpty title="未配置轮播页面" description="请在左右屏配置中设置 pageKeys。" />
           </section>
+        ) : (
+          pages.map((page, pageIndex) => {
+            const sliceSections = resolveVisibleSections(page.sections ?? [], moduleSettings);
+            const isSliceActive = pageIndex === activePageIndex;
+            return (
+              <ScreenCarouselPageContext.Provider key={page.key} value={{ isActive: isSliceActive }}>
+                <div
+                  className={`screen-page-slice${isSliceActive ? " screen-page-slice--active" : " screen-page-slice--hidden"}`}
+                  aria-hidden={!isSliceActive}
+                >
+                  {sliceSections.length > 0 ? (
+                    sliceSections.map((sectionKey) => {
+                      const node = sectionNodes[sectionKey];
+                      if (!node) return null;
+                      return (
+                        <Fragment key={`${page.key}-${sectionKey}`}>{node}</Fragment>
+                      );
+                    })
+                  ) : (
+                    <section className="screen-panel panel-span-12">
+                      <SectionEmpty
+                        title="当前轮播页没有可展示模块"
+                        description="请检查该屏幕的 moduleSettings 或 pageKeys 配置。"
+                      />
+                    </section>
+                  )}
+                </div>
+              </ScreenCarouselPageContext.Provider>
+            );
+          })
         )}
       </section>
     </main>

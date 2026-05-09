@@ -9,6 +9,7 @@ from datetime import timedelta
 from decimal import Decimal, ROUND_HALF_UP
 
 from django.db import close_old_connections, transaction
+from django.db.models import Q
 from django.utils.dateparse import parse_datetime
 from django.utils import timezone
 
@@ -259,6 +260,7 @@ def get_screen_payload(screen_key: str, area_code: str | None = None) -> dict:
     if "energy" in screen_config.get("pageKeys", []):
         payload["content"]["energyData"] = _build_energy_data_page(
             data_source_ids=_page_binding_data_source_ids(screen_config, "energy"),
+            energy_equipment_ids=_page_binding_energy_equipment_ids(screen_config, "energy"),
         )
 
     return payload
@@ -613,11 +615,11 @@ def _resolve_area(area_code: str | None):
     return area
 
 
-def _apply_screen_page_bindings(base: dict, config: "ScreenConfig | None") -> dict:
+def _apply_screen_page_bindings(base: dict, config: "ScreenConfig | None", area) -> dict:
     """
     大屏输出的 pageKeys / pageBindings 生成逻辑：
     1. 页面顺序：取 ScreenConfig.page_order（若非空）；否则回退 DEFAULT_SCREEN_CONFIGS 内置顺序。
-    2. 数据源配置：从全局 ScreenPageBinding 按 screen_key + page_key 查询（不区分区域）。
+    2. 数据源配置：优先 ScreenPageBinding（当前区域 + screen_key + page_key），无则回退 area 为空的旧数据。
     3. 仅将启用的绑定行插入 pageBindings；未启用的页面仍在 pageKeys 中（由前端渲染空壳）。
     """
     screen_key = base.get("screenKey")
@@ -630,9 +632,21 @@ def _apply_screen_page_bindings(base: dict, config: "ScreenConfig | None") -> di
         defaults = DEFAULT_SCREEN_CONFIGS.get(screen_key) or DEFAULT_SCREEN_CONFIGS["left"]
         page_order = list(defaults["pageKeys"])
 
-    # 全局数据源配置（不过滤 area）
-    bindings_qs = ScreenPageBinding.objects.filter(screen_key=screen_key, is_enabled=True)
-    bindings_map = {b.page_key: b for b in bindings_qs}
+    candidates = list(
+        ScreenPageBinding.objects.filter(
+            screen_key=screen_key,
+            page_key__in=page_order,
+            is_enabled=True,
+        ).filter(Q(area_id=area.id) | Q(area__isnull=True))
+    )
+
+    bindings_map: dict[str, ScreenPageBinding] = {}
+    for pk in page_order:
+        specific = next((b for b in candidates if b.page_key == pk and b.area_id == area.id), None)
+        fallback = next((b for b in candidates if b.page_key == pk and b.area_id is None), None)
+        b = specific or fallback
+        if b is not None:
+            bindings_map[pk] = b
 
     out = dict(base)
     out["pageKeys"] = list(page_order)
@@ -641,6 +655,7 @@ def _apply_screen_page_bindings(base: dict, config: "ScreenConfig | None") -> di
             "pageKey": b.page_key,
             "bindingSourceType": b.binding_source_type or None,
             "dataSourceIds": list(b.data_source_ids or []),
+            "energyEquipmentIds": [str(x) for x in (b.energy_equipment_ids or []) if str(x).strip()],
         }
         for pk in page_order
         if (b := bindings_map.get(pk)) is not None
@@ -660,7 +675,7 @@ def _get_screen_config(screen_key: str, area) -> dict:
         base = dict(DEFAULT_SCREEN_CONFIGS[screen_key])
         base["areaCode"] = area.code
         base["areaName"] = area.name
-        return _apply_screen_page_bindings(base, None)
+        return _apply_screen_page_bindings(base, None, area)
     merged = {
         "areaCode": area.code,
         "areaName": area.name,
@@ -672,7 +687,7 @@ def _get_screen_config(screen_key: str, area) -> dict:
         "themeSettings": config.theme_settings,
         "isActive": config.is_active,
     }
-    return _apply_screen_page_bindings(merged, config)
+    return _apply_screen_page_bindings(merged, config, area)
 
 
 def _get_display_content() -> dict:
@@ -1528,6 +1543,14 @@ def _page_binding_data_source_ids(screen_config: dict, page_key: str) -> list[in
     return []
 
 
+def _page_binding_energy_equipment_ids(screen_config: dict, page_key: str) -> list[str]:
+    for binding in screen_config.get("pageBindings") or []:
+        if binding.get("pageKey") == page_key:
+            raw = binding.get("energyEquipmentIds") or []
+            return [str(x).strip() for x in raw if str(x).strip()]
+    return []
+
+
 ENERGY_CATEGORY_LABELS = {
     1: "照明插座",
     2: "空调",
@@ -1580,18 +1603,14 @@ def _safe_kwh(real_data, multiplying_power) -> Decimal:
         return Decimal("0")
 
 
-def _build_energy_data_page(data_source_ids: list[int]) -> dict:
+def _build_energy_data_page(data_source_ids: list[int], energy_equipment_ids: list[str] | None = None) -> dict:
     """
-    查询能耗平台数据库（po_day / po_month / platform_equipment），
-    构建能耗数据页面载荷供前端渲染。
-
-    data_source_ids 必须在屏幕子页面绑定中明确配置；为空时直接返回提示，
-    不做全局 database 类型的兜底搜索，以免误连 WMS 等其他数据库。
+    能耗看板下发数据源 ID、标题与 refreshIntervalSeconds（秒）。
+    energyEquipmentIds：子页面绑定的 platform_equipment.e_id，大屏请求体带入。
     """
     if not data_source_ids:
         return _empty_energy_data_page("请在「屏幕子页面」中为能耗数据页面配置数据源")
 
-    # 信任用户选择的 ID，不再限制 source_type（energy_db 或 database 均可）
     sources = list(
         DataSourceConfig.objects.filter(
             pk__in=data_source_ids,
@@ -1603,115 +1622,24 @@ def _build_energy_data_page(data_source_ids: list[int]) -> dict:
         return _empty_energy_data_page("配置的能耗数据源未找到或已禁用")
 
     source = sources[0]
-    cc = source.connection_config or {}
-
-    try:
-        today_rows = _mysql_query_rows(
-            cc,
-            """
-            SELECT
-                e.p_e_name  AS equipment_name,
-                e.p_e_code  AS equipment_code,
-                d.energy_consumption,
-                d.collection_name,
-                d.real_data,
-                d.multiplying_power,
-                d.modify_time
-            FROM po_day d
-            LEFT JOIN platform_equipment e ON d.equipment_ids = e.e_id
-            WHERE d.types = 1
-              AND d.is_flag  = '0'
-              AND d.del_flag = '0'
-              AND DATE(d.create_time) = CURDATE()
-            ORDER BY d.energy_consumption, e.p_e_code
-            """,
-        )
-        month_agg_rows = _mysql_query_rows(
-            cc,
-            """
-            SELECT
-                d.energy_consumption,
-                SUM(
-                    COALESCE(CAST(NULLIF(d.real_data,'') AS DECIMAL(18,4)), 0)
-                    * COALESCE(CAST(NULLIF(d.multiplying_power,'0') AS DECIMAL(10,4)), 1)
-                ) AS total_kwh
-            FROM po_month d
-            WHERE d.types = 1
-              AND d.is_flag  = '0'
-              AND d.del_flag = '0'
-              AND YEAR(d.create_time)  = YEAR(CURDATE())
-              AND MONTH(d.create_time) = MONTH(CURDATE())
-            GROUP BY d.energy_consumption
-            """,
-        )
-    except Exception as exc:
-        logger.exception("energy_data_page query failed: %s", exc)
-        return _empty_energy_data_page(f"数据库查询失败: {exc}")
-
-    # ── today's totals ─────────────────────────────────────────────────────
-    today_total = Decimal("0")
-    category_totals: dict[int, Decimal] = {}
-    equipment_list: list[dict] = []
-
-    for row in today_rows:
-        kwh = _safe_kwh(row.get("real_data"), row.get("multiplying_power"))
-        today_total += kwh
-        cat = int(row.get("energy_consumption") or 0)
-        category_totals[cat] = category_totals.get(cat, Decimal("0")) + kwh
-        mt = row.get("modify_time")
-        equipment_list.append(
-            {
-                "equipmentName": row.get("equipment_name") or row.get("equipment_code") or "未知设备",
-                "equipmentCode": row.get("equipment_code") or "",
-                "category": ENERGY_CATEGORY_LABELS.get(cat, "其他"),
-                "categoryId": cat,
-                "collectionName": row.get("collection_name") or "",
-                "todayKwh": str(kwh.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)),
-                "updatedAt": mt.isoformat() if hasattr(mt, "isoformat") else str(mt or ""),
-            }
-        )
-
-    # ── monthly total ───────────────────────────────────────────────────────
-    month_total = Decimal("0")
-    for row in month_agg_rows:
-        try:
-            month_total += Decimal(str(row.get("total_kwh") or 0))
-        except Exception:
-            pass
-
-    # ── category breakdown ──────────────────────────────────────────────────
-    categories = []
-    for cat_id, label in ENERGY_CATEGORY_LABELS.items():
-        val = category_totals.get(cat_id, Decimal("0"))
-        pct = int(val / today_total * 100) if today_total > 0 else 0
-        categories.append(
-            {
-                "id": cat_id,
-                "label": label,
-                "color": ENERGY_CATEGORY_COLORS[cat_id],
-                "kwh": str(val.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)),
-                "percent": pct,
-            }
-        )
-
+    refresh_sec = max(60, int(getattr(source, "refresh_interval_seconds", None) or 300))
+    eq_ids = [str(x).strip() for x in (energy_equipment_ids or []) if str(x).strip()]
     return {
-        "todayKwh": str(today_total.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)),
-        "monthKwh": str(month_total.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)),
-        "unit": "kWh",
-        "categories": categories,
-        "equipmentList": equipment_list,
-        "updatedAt": timezone.localtime().isoformat(),
+        "pageTitle": "能耗数据采集与设备状态监测看板",
+        "dataSourceIds": [s.pk for s in sources],
         "sourceName": getattr(source, "name", None) or getattr(source, "code", ""),
+        "dashboardMode": True,
+        "refreshIntervalSeconds": refresh_sec,
+        "energyEquipmentIds": eq_ids,
+        "updatedAt": timezone.localtime().isoformat(),
     }
 
 
 def _empty_energy_data_page(reason: str) -> dict:
     return {
-        "todayKwh": "0.00",
-        "monthKwh": "0.00",
-        "unit": "kWh",
-        "categories": [],
-        "equipmentList": [],
+        "pageTitle": "能耗数据采集与设备状态监测看板",
+        "dataSourceIds": [],
+        "dashboardMode": True,
         "updatedAt": timezone.localtime().isoformat(),
         "errorMessage": reason,
     }

@@ -504,8 +504,20 @@ PAGE_KEY_LABELS = {
 
 class ScreenPageBindingSerializer(CamelCaseModelSerializer):
     page_key_label = serializers.SerializerMethodField()
+    binding_scope_label = serializers.SerializerMethodField()
+    area_id = serializers.PrimaryKeyRelatedField(
+        queryset=Area.objects.all(),
+        source="area",
+        allow_null=True,
+        required=False,
+    )
     data_source_ids = serializers.ListField(
         child=serializers.IntegerField(min_value=1),
+        required=False,
+        allow_empty=True,
+    )
+    energy_equipment_ids = serializers.ListField(
+        child=serializers.CharField(allow_blank=False),
         required=False,
         allow_empty=True,
     )
@@ -513,15 +525,25 @@ class ScreenPageBindingSerializer(CamelCaseModelSerializer):
     def get_page_key_label(self, obj):
         return PAGE_KEY_LABELS.get(obj.page_key, obj.page_key)
 
+    def get_binding_scope_label(self, obj):
+        sk = "左屏" if obj.screen_key == "left" else "右屏"
+        ar = getattr(obj, "area", None)
+        if ar:
+            return f"{ar.code}-{ar.name}的{sk}"
+        return f"{sk}（未指定区域）"
+
     class Meta:
         model = ScreenPageBinding
         fields = [
             "id",
+            "area_id",
+            "binding_scope_label",
             "screen_key",
             "page_key",
             "page_key_label",
             "binding_source_type",
             "data_source_ids",
+            "energy_equipment_ids",
             "is_enabled",
             "notes",
             "created_at",
@@ -537,6 +559,19 @@ class ScreenPageBindingSerializer(CamelCaseModelSerializer):
             raise serializers.ValidationError(
                 {"page_key": f"page_key '{page_key}' is not a known page key"}
             )
+        area = attrs.get("area", getattr(instance, "area", None))
+        if screen_key and page_key:
+            qs = ScreenPageBinding.objects.filter(screen_key=screen_key, page_key=page_key)
+            if area is None:
+                qs = qs.filter(area__isnull=True)
+            else:
+                qs = qs.filter(area_id=area.pk)
+            if instance is not None:
+                qs = qs.exclude(pk=instance.pk)
+            if qs.exists():
+                raise serializers.ValidationError(
+                    "该区域（或未指定区域）下，同一屏幕与子页面的绑定已存在。"
+                )
         return attrs
 
 
