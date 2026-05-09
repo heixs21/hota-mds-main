@@ -1,3 +1,4 @@
+from decimal import Decimal
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
@@ -18,12 +19,15 @@ from .models import (
     Area,
     DataSourceConfig,
     Device,
+    ScreenConfig,
     DisplayContentConfig,
     Material,
     OperationLog,
     Order,
     PageModuleSwitch,
     ProductionLine,
+    RuntimeParameterConfig,
+    ScreenPageBinding,
 )
 
 
@@ -308,6 +312,192 @@ class BackofficeApiTests(TestCase):
             item.node,
             ["ns=2;s=/Channel/State/chanStatus", "ns=2;s=/Channel/State/chanAlarm"],
         )
+
+    def test_opcua_bulk_refresh_interval_updates_matching_rows(self):
+        for code, name in (
+            ("opcua-bulk-a", "筛选命中甲"),
+            ("opcua-bulk-b", "筛选命中乙"),
+        ):
+            create_response = self.client.post(
+                "/api/admin/data-source-configs",
+                {
+                    "code": code,
+                    "name": name,
+                    "sourceType": "opcua",
+                    "connectionConfig": {"endpointUrl": "opc.tcp://127.0.0.1:4840"},
+                    "node": [{"nodeId": "ns=2;s=/x", "comment": "测试节点"}],
+                    "refreshIntervalSeconds": 300,
+                },
+                format="json",
+            )
+            self.assertEqual(create_response.status_code, 201)
+
+        id_a = DataSourceConfig.objects.get(code="opcua-bulk-a").pk
+        id_b = DataSourceConfig.objects.get(code="opcua-bulk-b").pk
+
+        empty_response = self.client.post(
+            "/api/admin/data-source-configs/bulk-refresh-interval",
+            {"refreshIntervalSeconds": 60, "ids": []},
+            format="json",
+        )
+        self.assertEqual(empty_response.status_code, 400)
+
+        all_response = self.client.post(
+            "/api/admin/data-source-configs/bulk-refresh-interval",
+            {"refreshIntervalSeconds": 60, "ids": [id_a, id_b]},
+            format="json",
+        )
+        self.assertEqual(all_response.status_code, 200)
+        self.assertEqual(all_response.data["data"]["updatedCount"], 2)
+        self.assertEqual(DataSourceConfig.objects.get(code="opcua-bulk-a").refresh_interval_seconds, 60)
+        self.assertEqual(DataSourceConfig.objects.get(code="opcua-bulk-b").refresh_interval_seconds, 60)
+
+        filtered_response = self.client.post(
+            "/api/admin/data-source-configs/bulk-refresh-interval?keyword=bulk-a",
+            {"refreshIntervalSeconds": 120, "ids": [id_a]},
+            format="json",
+        )
+        self.assertEqual(filtered_response.status_code, 200)
+        self.assertEqual(filtered_response.data["data"]["updatedCount"], 1)
+        self.assertEqual(DataSourceConfig.objects.get(code="opcua-bulk-a").refresh_interval_seconds, 120)
+        self.assertEqual(DataSourceConfig.objects.get(code="opcua-bulk-b").refresh_interval_seconds, 60)
+
+        bad_response = self.client.post(
+            "/api/admin/data-source-configs/bulk-refresh-interval",
+            {"refreshIntervalSeconds": 3, "ids": [id_a]},
+            format="json",
+        )
+        self.assertEqual(bad_response.status_code, 400)
+
+    def test_screen_config_bulk_rotation_interval_updates_checked_rows(self):
+        area_response = self.client.post(
+            "/api/admin/areas",
+            {"code": "A-SC-BULK", "name": "屏批量测", "isActive": True},
+            format="json",
+        )
+        self.assertEqual(area_response.status_code, 201)
+        aid = area_response.data["data"]["id"]
+
+        created_ids = []
+        for screen_key, title in (("left", "左屏"), ("right", "右屏")):
+            sc_response = self.client.post(
+                "/api/admin/screen-configs",
+                {
+                    "areaId": aid,
+                    "screenKey": screen_key,
+                    "title": title,
+                    "subtitle": "",
+                    "rotationIntervalSeconds": 60,
+                    "pageOrder": [],
+                    "moduleSettings": {},
+                    "themeSettings": {},
+                    "isActive": True,
+                },
+                format="json",
+            )
+            self.assertEqual(sc_response.status_code, 201)
+            created_ids.append(sc_response.data["data"]["id"])
+
+        bulk_response = self.client.post(
+            "/api/admin/screen-configs/bulk-rotation-interval",
+            {"rotationIntervalSeconds": 120, "ids": created_ids},
+            format="json",
+        )
+        self.assertEqual(bulk_response.status_code, 200)
+        self.assertEqual(bulk_response.data["data"]["updatedCount"], 2)
+        for pk in created_ids:
+            self.assertEqual(ScreenConfig.objects.get(pk=pk).rotation_interval_seconds, 120)
+
+        one_response = self.client.post(
+            "/api/admin/screen-configs/bulk-rotation-interval",
+            {"rotationIntervalSeconds": 45, "ids": [created_ids[0]]},
+            format="json",
+        )
+        self.assertEqual(one_response.status_code, 200)
+        self.assertEqual(ScreenConfig.objects.get(pk=created_ids[0]).rotation_interval_seconds, 45)
+        self.assertEqual(ScreenConfig.objects.get(pk=created_ids[1]).rotation_interval_seconds, 120)
+
+    def test_runtime_parameter_config_bulk_runtime_fields(self):
+        created_ids = []
+        for config_key in ("rt-bulk-a", "rt-bulk-b"):
+            r = self.client.post(
+                "/api/admin/runtime-parameter-configs",
+                {
+                    "configKey": config_key,
+                    "singleDayEffectiveWorkHours": "8.00",
+                    "defaultStandardCapacityPerHour": "1.00",
+                    "delayWarningBufferHours": "1.00",
+                    "ganttWindowDays": 20,
+                    "autoScrollEnabled": True,
+                    "autoScrollRowsThreshold": 10,
+                    "recentCapacityWindowHours": 2,
+                    "productionTrendWindowHours": 8,
+                    "isActive": True,
+                },
+                format="json",
+            )
+            self.assertEqual(r.status_code, 201)
+            created_ids.append(r.data["data"]["id"])
+
+        bulk = self.client.post(
+            "/api/admin/runtime-parameter-configs/bulk-runtime-fields",
+            {
+                "ids": created_ids,
+                "singleDayEffectiveWorkHours": "12.50",
+                "ganttWindowDays": 45,
+            },
+            format="json",
+        )
+        self.assertEqual(bulk.status_code, 200)
+        self.assertEqual(bulk.data["data"]["updatedCount"], 2)
+        self.assertEqual(
+            RuntimeParameterConfig.objects.get(config_key="rt-bulk-a").single_day_effective_work_hours,
+            Decimal("12.50"),
+        )
+        self.assertEqual(RuntimeParameterConfig.objects.get(config_key="rt-bulk-a").gantt_window_days, 45)
+
+    def test_modbus_tcp_bulk_refresh_interval_updates_checked_rows(self):
+        ids = []
+        for code in ("mb-bulk-a", "mb-bulk-b"):
+            r = self.client.post(
+                "/api/admin/data-source-configs",
+                {
+                    "code": code,
+                    "name": code,
+                    "sourceType": "modbus_tcp",
+                    "connectionConfig": {},
+                    "refreshIntervalSeconds": 300,
+                },
+                format="json",
+            )
+            self.assertEqual(r.status_code, 201, msg=r.data if hasattr(r, "data") else code)
+            ids.append(r.data["data"]["id"])
+
+        bulk = self.client.post(
+            "/api/admin/data-source-configs/bulk-refresh-interval?source_type=modbus_tcp",
+            {"refreshIntervalSeconds": 90, "ids": ids},
+            format="json",
+        )
+        self.assertEqual(bulk.status_code, 200)
+        self.assertEqual(bulk.data["data"]["updatedCount"], 2)
+        self.assertEqual(DataSourceConfig.objects.get(code="mb-bulk-a").refresh_interval_seconds, 90)
+
+    def test_screen_page_binding_bulk_set_enabled(self):
+        list_response = self.client.get("/api/admin/screen-page-bindings?pageSize=50")
+        self.assertEqual(list_response.status_code, 200)
+        items = list_response.data["data"]["items"]
+        self.assertGreaterEqual(len(items), 2)
+        ids = [items[0]["id"], items[1]["id"]]
+
+        bulk = self.client.post(
+            "/api/admin/screen-page-bindings/bulk-set-enabled",
+            {"ids": ids, "isEnabled": False},
+            format="json",
+        )
+        self.assertEqual(bulk.status_code, 200)
+        self.assertEqual(bulk.data["data"]["updatedCount"], 2)
+        for pk in ids:
+            self.assertFalse(ScreenPageBinding.objects.get(pk=pk).is_enabled)
 
     @patch("backoffice.views.test_opcua_connection")
     def test_opcua_test_connection_forwards_node_list(self, mock_test_opcua_connection):
