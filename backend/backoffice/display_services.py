@@ -171,11 +171,22 @@ def get_screen_payload(screen_key: str, area_code: str | None = None) -> dict:
 
     if screen_key == "left":
         area_device_overview = _build_area_device_overview(area)
-        filtered_line_summaries = _filter_line_summaries_by_area(production_snapshot.line_summaries, area)
-        total_target_quantity = sum(int(item.get("targetQuantity") or 0) for item in filtered_line_summaries)
-        total_produced_quantity = sum(int(item.get("producedQuantity") or 0) for item in filtered_line_summaries)
-        area_completion_rate = _percentage(total_produced_quantity, total_target_quantity)
         filtered_area_summaries = _filter_area_energy_summaries_by_area(energy_snapshot.area_summaries, area)
+        ledger_line_count = _count_active_production_lines_in_area(area)
+        schedule_db_po = _try_build_left_production_overview_from_schedule_db(area, screen_config, runtime_parameters)
+
+        if schedule_db_po is not None:
+            total_target_quantity = schedule_db_po["totalTargetQuantity"]
+            total_produced_quantity = schedule_db_po["totalProducedQuantity"]
+            area_completion_rate = schedule_db_po["overallCompletionRateFloat"]
+            filtered_line_summaries = schedule_db_po["lineSummaries"]
+            po_source_mode = "schedule_database"
+        else:
+            filtered_line_summaries = _filter_line_summaries_by_area(production_snapshot.line_summaries, area)
+            total_target_quantity = sum(int(item.get("targetQuantity") or 0) for item in filtered_line_summaries)
+            total_produced_quantity = sum(int(item.get("producedQuantity") or 0) for item in filtered_line_summaries)
+            area_completion_rate = _percentage(total_produced_quantity, total_target_quantity)
+            po_source_mode = "snapshot"
 
         device_overview = {
             "totalCount": area_device_overview["total_count"],
@@ -201,10 +212,13 @@ def get_screen_payload(screen_key: str, area_code: str | None = None) -> dict:
                     "totalProducedQuantity": total_produced_quantity,
                     "overallCompletionRate": str(area_completion_rate),
                     "lineSummaries": filtered_line_summaries,
+                    "ledgerProductionLineCount": ledger_line_count,
+                    "productionMetricsSource": po_source_mode,
                     "display": _build_production_overview_display(
                         total_target_quantity,
                         total_produced_quantity,
                         area_completion_rate,
+                        source_mode=po_source_mode,
                     ),
                 },
                 "productionTrend": production_snapshot.trend_points,
@@ -1933,6 +1947,142 @@ def _filter_line_summaries_by_area(line_summaries: list[dict], area) -> list[dic
     return filtered
 
 
+def _count_active_production_lines_in_area(area) -> int:
+    """产线台账：仅统计当前区域内启用的产线（与大屏产线列表同源）。"""
+    return ProductionLine.objects.filter(area=area, is_active=True).count()
+
+
+def _order_status_is_wip_or_pending_for_overview(status: str) -> bool:
+    """在制 / 待制工单（排产库 status 文本）：暂停、完工类不计入产量概览汇总。"""
+    s = (status or "").strip()
+    if not s:
+        return False
+    if "暂停" in s or s.lower() == "paused":
+        return False
+    if any(k in s for k in ("完成", "完工", "结案", "关闭", "结束")):
+        return False
+    sl = s.lower()
+    if any(k in s for k in ("在制", "生产中", "进行", "加工中", "执行", "在产")):
+        return True
+    if sl in ("in_progress", "processing"):
+        return True
+    if any(k in s for k in ("待制", "待产", "待开工")):
+        return True
+    if any(k in s for k in ("未开始", "计划", "待开始")):
+        return True
+    if sl in ("planned", "pending", "released"):
+        return True
+    return False
+
+
+def _safe_parse_schedule_dt(value) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        dt = value
+        return timezone.localtime(dt) if timezone.is_aware(dt) else timezone.make_aware(dt)
+    p = parse_datetime(str(value))
+    if not p:
+        return None
+    return timezone.localtime(p) if timezone.is_aware(p) else timezone.make_aware(p)
+
+
+def _try_build_left_production_overview_from_schedule_db(area, screen_config: dict, runtime_parameters: dict) -> dict | None:
+    """左屏产量执行概览：从后台配置的排产系统数据库汇总在制/待制工单。失败或未配置数据源时返回 None。"""
+    source = _resolve_schedule_data_source(screen_config)
+    if not source:
+        return None
+    lines_qs = list(ProductionLine.objects.filter(area=area, is_active=True).select_related("area").order_by("code"))
+    if not lines_qs:
+        return {
+            "totalTargetQuantity": 0,
+            "totalProducedQuantity": 0,
+            "overallCompletionRateFloat": 0.0,
+            "lineSummaries": [],
+        }
+    codes = [pl.code for pl in lines_qs]
+    try:
+        from .schedule_mysql_source import fetch_mysql_schedule_orders_by_line_codes
+
+        grouped = fetch_mysql_schedule_orders_by_line_codes(
+            source.connection_config or {},
+            codes,
+            int(runtime_parameters.get("ganttWindowDays") or 30),
+        )
+    except Exception:
+        logger.warning("左屏产量概览：排产系统数据库查询失败，回退演示快照", exc_info=True)
+        return None
+
+    line_summaries: list[dict] = []
+    total_target = 0
+    total_produced = 0
+    now = timezone.now()
+
+    for pl in lines_qs:
+        raw_orders = grouped.get(pl.code) or []
+        orders = [o for o in raw_orders if _order_status_is_wip_or_pending_for_overview(str(o.get("status") or ""))]
+        tq = sum(int(o.get("targetQuantity") or 0) for o in orders)
+        pq = sum(int(o.get("producedQuantity") or 0) for o in orders)
+        total_target += tq
+        total_produced += pq
+        cr = _percentage(pq, tq)
+        if not orders:
+            planned_start_at = now
+            planned_end_at = now
+            estimated_completion_at = now
+            current_order_code = "—"
+            is_delayed = False
+        else:
+            starts = [_safe_parse_schedule_dt(o.get("plannedStartAt")) for o in orders]
+            ends = [_safe_parse_schedule_dt(o.get("plannedEndAt")) for o in orders]
+            starts = [x for x in starts if x]
+            ends = [x for x in ends if x]
+            planned_start_at = min(starts) if starts else now
+            planned_end_at = max(ends) if ends else (max(starts) if starts else now)
+            estimated_completion_at = planned_end_at
+            if len(orders) == 1:
+                current_order_code = str(orders[0].get("orderCode") or "").strip() or "—"
+            else:
+                first = str(orders[0].get("orderCode") or "").strip() or "—"
+                current_order_code = f"{first} 等{len(orders)}笔"
+            max_end = max(ends) if ends else None
+            is_delayed = bool(tq > pq and max_end and max_end < now)
+
+        line_summaries.append(
+            {
+                "lineCode": pl.code,
+                "lineName": pl.name,
+                "areaName": area.name,
+                "currentOrderCode": current_order_code,
+                "targetQuantity": tq,
+                "producedQuantity": pq,
+                "completionRate": cr,
+                "plannedStartAt": planned_start_at.isoformat(),
+                "plannedEndAt": planned_end_at.isoformat(),
+                "estimatedCompletionAt": estimated_completion_at.isoformat(),
+                "isDelayed": is_delayed,
+                "display": _build_production_line_display(
+                    current_order_code,
+                    tq,
+                    pq,
+                    cr,
+                    planned_start_at,
+                    planned_end_at,
+                    estimated_completion_at,
+                    is_delayed,
+                ),
+            }
+        )
+
+    overall_float = _percentage(total_produced, total_target)
+    return {
+        "totalTargetQuantity": total_target,
+        "totalProducedQuantity": total_produced,
+        "overallCompletionRateFloat": overall_float,
+        "lineSummaries": line_summaries,
+    }
+
+
 def _build_area_line_schedules(line_schedules: list[dict], area) -> list[dict]:
     """以产线台账（按当前区域过滤）为基准构造右屏排产产线列表。
 
@@ -2094,12 +2244,28 @@ def _resolve_mock_risk_status(line_number: int, order_number: int) -> str:
     return "normal"
 
 
-def _build_production_overview_display(total_target_quantity: int, total_produced_quantity: int, overall_completion_rate) -> dict:
-    return {
+def _build_production_overview_display(
+    total_target_quantity: int,
+    total_produced_quantity: int,
+    overall_completion_rate,
+    *,
+    source_mode: str = "snapshot",
+) -> dict:
+    out = {
         "overallCompletionRateLabel": f"{overall_completion_rate}%",
         "totalTargetQuantityLabel": f"{total_target_quantity}",
         "totalProducedQuantityLabel": f"{total_produced_quantity}",
     }
+    if source_mode == "schedule_database":
+        out["dataSourceNote"] = (
+            "产线条数按本区域产线台账中启用的产线统计。目标产量、已产数量分别为该区域在制与待制工单的"
+            "目标产量之和与已产数量之和，完成率按已产数量÷目标产量计算。数据来源于后台配置的排产系统数据库。"
+        )
+    else:
+        out["dataSourceNote"] = (
+            "产线条数按本区域产线台账中启用的产线统计。当前未接入排产系统数据库，产量指标来自内置演示快照。"
+        )
+    return out
 
 
 def _build_energy_overview_display(total_consumption, unit: str) -> dict:
@@ -2122,6 +2288,26 @@ def _format_display_datetime(value) -> str:
     if not value:
         return "-"
     return timezone.localtime(value).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _format_display_date(value) -> str:
+    """大屏产量产线卡片：计划区间与预计完成仅展示年月日。"""
+    if value is None or value == "":
+        return "-"
+    if isinstance(value, datetime):
+        dt = timezone.localtime(value) if timezone.is_aware(value) else value
+        return dt.strftime("%Y-%m-%d")
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, str):
+        parsed_d = _coerce_json_order_date(value)
+        if parsed_d:
+            return parsed_d.isoformat()
+        parsed_dt = parse_datetime(value)
+        if parsed_dt:
+            return timezone.localtime(parsed_dt).strftime("%Y-%m-%d")
+        return "-"
+    return "-"
 
 
 def _build_payload_meta_display(last_success_at) -> dict:
@@ -2252,8 +2438,8 @@ def _build_production_line_display(
         "targetQuantityLabel": f"目标 {target_quantity}",
         "producedQuantityLabel": f"已产 {produced_quantity}",
         "completionRateLabel": f"{completion_rate}%",
-        "plannedRangeLabel": f"{_format_display_datetime(planned_start_at)} - {_format_display_datetime(planned_end_at)}",
-        "estimatedCompletionLabel": _format_display_datetime(estimated_completion_at),
+        "plannedRangeLabel": f"{_format_display_date(planned_start_at)} - {_format_display_date(planned_end_at)}",
+        "estimatedCompletionLabel": _format_display_date(estimated_completion_at),
         "progressAccent": "red" if is_delayed else "blue",
     }
 

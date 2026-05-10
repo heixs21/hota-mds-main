@@ -132,6 +132,26 @@ function formatNumber(value) {
   return new Intl.NumberFormat("zh-CN").format(Number(value));
 }
 
+/** 产线卡片时间兜底：仅展示 YYYY-MM-DD */
+function formatScreenDateOnly(value) {
+  if (value == null || value === "") {
+    return "-";
+  }
+  const s = String(value).trim();
+  const head = s.slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(head)) {
+    return head;
+  }
+  const t = new Date(s);
+  if (Number.isNaN(t.getTime())) {
+    return "-";
+  }
+  const y = t.getFullYear();
+  const m = String(t.getMonth() + 1).padStart(2, "0");
+  const d = String(t.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
 function formatRpm(value) {
   if (value === null || value === undefined || value === "") {
     return "--";
@@ -876,6 +896,8 @@ function LeftScreen({ payload, errorMessage, fullscreenState, screenRef }) {
   const lineSummaries = productionOverview.lineSummaries ?? [];
   const areaSummaries = energyOverview.areaSummaries ?? [];
   const productionDisplay = productionOverview.display ?? {};
+  const ledgerLineCount =
+    productionOverview.ledgerProductionLineCount != null ? productionOverview.ledgerProductionLineCount : lineSummaries.length;
   const energyDisplay = energyOverview.display ?? {};
   const deviceDisplay = deviceOverview.display ?? {};
   const moduleSettings = screen.moduleSettings ?? {};
@@ -946,10 +968,7 @@ function LeftScreen({ payload, errorMessage, fullscreenState, screenRef }) {
       <section className="screen-panel panel-span-4 production-overview-panel" key="productionOverview">
         <div className="panel-header">
           <h2>产量执行概览</h2>
-          <span>
-            {`产线 ${lineSummaries.length} 条`}
-            {lineListOverflowing ? " · 自动滚动中" : ""}
-          </span>
+          <span>{`产线 ${ledgerLineCount} 条`}</span>
         </div>
         <div className="metric-grid metric-grid-two">
           <MetricTile
@@ -1006,8 +1025,11 @@ function LeftScreen({ payload, errorMessage, fullscreenState, screenRef }) {
                     </span>
                   </div>
                   <div className="line-summary-timeline">
-                    <span>{itemDisplay.plannedRangeLabel || `${item.plannedStartAt || "-"} - ${item.plannedEndAt || "-"}`}</span>
-                    <span>{`预计完成 ${itemDisplay.estimatedCompletionLabel || item.estimatedCompletionAt || "-"}`}</span>
+                    <span>
+                      {itemDisplay.plannedRangeLabel ||
+                        `${formatScreenDateOnly(item.plannedStartAt)} - ${formatScreenDateOnly(item.plannedEndAt)}`}
+                    </span>
+                    <span>{`预计完成 ${itemDisplay.estimatedCompletionLabel || formatScreenDateOnly(item.estimatedCompletionAt)}`}</span>
                   </div>
                 </article>
               );

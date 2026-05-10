@@ -595,14 +595,13 @@ class BackofficeApiTests(TestCase):
                 "abnormalCountLabel": "0",
             },
         )
-        self.assertEqual(
-            response.data["data"]["content"]["productionOverview"]["display"],
-            {
-                "overallCompletionRateLabel": "86.01%",
-                "totalTargetQuantityLabel": "10720",
-                "totalProducedQuantityLabel": "9220",
-            },
-        )
+        po_display = response.data["data"]["content"]["productionOverview"]["display"]
+        self.assertEqual(po_display["overallCompletionRateLabel"], "86.01%")
+        self.assertEqual(po_display["totalTargetQuantityLabel"], "10720")
+        self.assertEqual(po_display["totalProducedQuantityLabel"], "9220")
+        self.assertIn("产线台账", po_display["dataSourceNote"])
+        self.assertEqual(response.data["data"]["content"]["productionOverview"]["ledgerProductionLineCount"], 1)
+        self.assertEqual(response.data["data"]["content"]["productionOverview"]["productionMetricsSource"], "snapshot")
         self.assertEqual(len(response.data["data"]["content"]["productionOverview"]["lineSummaries"]), 8)
         self.assertEqual(
             response.data["data"]["content"]["productionOverview"]["lineSummaries"][0]["display"],
@@ -611,8 +610,8 @@ class BackofficeApiTests(TestCase):
                 "targetQuantityLabel": "目标 920",
                 "producedQuantityLabel": "已产 785",
                 "completionRateLabel": "85.33%",
-                "plannedRangeLabel": f"{parse_datetime(response.data['data']['content']['productionOverview']['lineSummaries'][0]['plannedStartAt']).astimezone().strftime('%Y-%m-%d %H:%M:%S')} - {parse_datetime(response.data['data']['content']['productionOverview']['lineSummaries'][0]['plannedEndAt']).astimezone().strftime('%Y-%m-%d %H:%M:%S')}",
-                "estimatedCompletionLabel": parse_datetime(response.data["data"]["content"]["productionOverview"]["lineSummaries"][0]["estimatedCompletionAt"]).astimezone().strftime("%Y-%m-%d %H:%M:%S"),
+                "plannedRangeLabel": f"{parse_datetime(response.data['data']['content']['productionOverview']['lineSummaries'][0]['plannedStartAt']).astimezone().strftime('%Y-%m-%d')} - {parse_datetime(response.data['data']['content']['productionOverview']['lineSummaries'][0]['plannedEndAt']).astimezone().strftime('%Y-%m-%d')}",
+                "estimatedCompletionLabel": parse_datetime(response.data["data"]["content"]["productionOverview"]["lineSummaries"][0]["estimatedCompletionAt"]).astimezone().strftime("%Y-%m-%d"),
                 "progressAccent": "blue",
             },
         )
