@@ -3,6 +3,7 @@ from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
 from django.db import models
 from django.db.models import Q
+from django.utils.translation import gettext_lazy as _
 
 
 class TimestampedModel(models.Model):
@@ -434,6 +435,13 @@ class DisplayContentConfig(ReservedFieldsMixin, TimestampedModel):
             raise ValidationError("promo_image_urls must be a list")
 
 
+class GanttAnchorMode(models.TextChoices):
+    """甘特图时间窗口起点：与展示用的窗口锚点一致。"""
+
+    EARLIEST_ORDER = "earliest_order", _("最早未完成工单")
+    CURRENT_TIME = "current_time", _("当前日期")
+
+
 class RuntimeParameterConfig(ReservedFieldsMixin, TimestampedModel):
     """大屏与排产业务的运行时参数：产能窗口、甘特图天数、自动滚动等。"""
 
@@ -464,6 +472,14 @@ class RuntimeParameterConfig(ReservedFieldsMixin, TimestampedModel):
         default=30,
         verbose_name="甘特图展示窗口（天）",
         db_comment="甘特图展示窗口（天）",
+    )
+    gantt_anchor_mode = models.CharField(
+        max_length=32,
+        choices=GanttAnchorMode.choices,
+        default=GanttAnchorMode.EARLIEST_ORDER,
+        verbose_name="甘特图开始时间",
+        help_text="当前日期：从今日起向后覆盖窗口天数；最早未完成工单：从区域内最早一笔工单计划开始日起计。",
+        db_comment="甘特窗口锚点模式 earliest_order / current_time",
     )
     auto_scroll_enabled = models.BooleanField(
         default=True,

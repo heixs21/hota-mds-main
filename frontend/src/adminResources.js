@@ -41,6 +41,12 @@ const SCREEN_KEY_OPTIONS = [
   { value: "right", label: "右屏" },
 ];
 
+/** 与后端 RuntimeParameterConfig.gantt_anchor_mode 一致 */
+const GANTT_ANCHOR_MODE_OPTIONS = [
+  { value: "earliest_order", label: "最早未完成工单" },
+  { value: "current_time", label: "当前日期" },
+];
+
 /** 全部子页面键与中文名（与大屏前端 PAGE_PRESETS 一致），可自由分配到左或右屏 */
 export const ALL_PAGE_KEY_OPTIONS = {
   overview: "综合总览",
@@ -782,6 +788,7 @@ export const resourceDefinitions = {
       { key: "singleDayEffectiveWorkHours", label: "日有效工时" },
       { key: "defaultStandardCapacityPerHour", label: "标准产能/小时" },
       { key: "ganttWindowDays", label: "甘特窗口天数" },
+      { key: "ganttAnchorMode", label: "甘特图开始时间" },
     ],
     queryFields: [
       { key: "keyword", label: "关键字", type: "text", placeholder: "配置键/备注" },
@@ -793,6 +800,13 @@ export const resourceDefinitions = {
       { key: "defaultStandardCapacityPerHour", label: "默认标准产能/小时", type: "decimal", required: true, defaultValue: "0.00" },
       { key: "delayWarningBufferHours", label: "延期预警缓冲小时", type: "decimal", required: true, defaultValue: "0.00" },
       { key: "ganttWindowDays", label: "甘特窗口天数", type: "integer", required: true, defaultValue: 30 },
+      {
+        key: "ganttAnchorMode",
+        label: "甘特图开始时间",
+        type: "select",
+        options: GANTT_ANCHOR_MODE_OPTIONS,
+        defaultValue: "earliest_order",
+      },
       { key: "autoScrollEnabled", label: "启用自动滚动", type: "checkbox", defaultValue: true },
       { key: "autoScrollRowsThreshold", label: "自动滚动行数阈值", type: "integer", required: true, defaultValue: 10 },
       { key: "recentCapacityWindowHours", label: "最近产能窗口小时", type: "integer", required: true, defaultValue: 2 },

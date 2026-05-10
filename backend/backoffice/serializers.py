@@ -249,6 +249,7 @@ class RuntimeParameterConfigSerializer(CamelCaseModelSerializer):
             "default_standard_capacity_per_hour",
             "delay_warning_buffer_hours",
             "gantt_window_days",
+            "gantt_anchor_mode",
             "auto_scroll_enabled",
             "auto_scroll_rows_threshold",
             "recent_capacity_window_hours",

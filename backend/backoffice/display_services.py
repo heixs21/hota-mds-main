@@ -5,7 +5,7 @@ import logging
 import re
 import threading
 from collections import defaultdict
-from datetime import timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 
 from django.db import close_old_connections, transaction
@@ -96,6 +96,7 @@ DEFAULT_RUNTIME_PARAMETERS = {
     "defaultStandardCapacityPerHour": "120.00",
     "delayWarningBufferHours": "2.00",
     "ganttWindowDays": 30,
+    "ganttAnchorMode": "earliest_order",
     "autoScrollEnabled": True,
     "autoScrollRowsThreshold": 10,
     "recentCapacityWindowHours": 2,
@@ -224,12 +225,26 @@ def get_screen_payload(screen_key: str, area_code: str | None = None) -> dict:
             }
         )
     else:
-        filtered_line_schedules = _build_area_line_schedules(schedule_snapshot.line_schedules, area)
+        mysql_line_input = _try_mysql_line_schedules_input(area, runtime_parameters, screen_config)
+        line_schedules_for_merge = (
+            mysql_line_input if mysql_line_input is not None else schedule_snapshot.line_schedules
+        )
+        merged_line_schedules = _build_area_line_schedules(line_schedules_for_merge, area)
+        merged_line_schedules = _drop_completed_schedule_orders_from_gantt(merged_line_schedules)
+        anchor_mode = _normalize_gantt_anchor_mode(runtime_parameters.get("ganttAnchorMode"))
+        schedule_anchor_date = _compute_schedule_window_anchor(merged_line_schedules, anchor_mode)
+        filtered_line_schedules = _filter_line_schedules_to_anchor_window(
+            merged_line_schedules,
+            schedule_anchor_date,
+            runtime_parameters["ganttWindowDays"],
+        )
         risk_counts = _build_risk_counts(filtered_line_schedules)
         payload["content"].update(
             {
                 "schedule": {
                     "windowDays": runtime_parameters["ganttWindowDays"],
+                    "ganttAnchorMode": anchor_mode,
+                    "windowAnchorDate": schedule_anchor_date.isoformat(),
                     "autoScrollEnabled": runtime_parameters["autoScrollEnabled"],
                     "autoScrollRowsThreshold": runtime_parameters["autoScrollRowsThreshold"],
                     "lineSchedules": filtered_line_schedules,
@@ -526,6 +541,7 @@ def _build_schedule_snapshot(current_time, source_updated_at, runtime_parameters
                 {
                     "orderCode": f"PLAN-{line_number:03d}-{order_number}",
                     "materialCode": f"MAT-{line_number:03d}-{order_number}",
+                    "materialName": f"演示物料 M-{line_number:03d}-{order_number}",
                     "status": "in_progress" if line_number == 1 and order_number == 1 else ("paused" if risk_status == "paused" else "planned"),
                     "riskStatus": risk_status,
                     "targetQuantity": target_quantity,
@@ -726,12 +742,15 @@ def _get_runtime_parameters() -> dict:
         DEFAULT_RUNTIME_PARAMETERS["productionTrendWindowHours"],
     )
 
+    gantt_anchor_mode = _normalize_gantt_anchor_mode(getattr(config, "gantt_anchor_mode", None))
+
     return {
         "configKey": config.config_key,
         "singleDayEffectiveWorkHours": str(config.single_day_effective_work_hours),
         "defaultStandardCapacityPerHour": str(default_standard_capacity_per_hour),
         "delayWarningBufferHours": str(config.delay_warning_buffer_hours),
         "ganttWindowDays": gantt_window_days,
+        "ganttAnchorMode": gantt_anchor_mode,
         "autoScrollEnabled": config.auto_scroll_enabled,
         "autoScrollRowsThreshold": auto_scroll_rows_threshold,
         "recentCapacityWindowHours": recent_capacity_window_hours,
@@ -1551,6 +1570,52 @@ def _page_binding_energy_equipment_ids(screen_config: dict, page_key: str) -> li
     return []
 
 
+def _is_database_source_type(source_type: str | None) -> bool:
+    return (source_type or "").strip().lower() in {
+        "database",
+        "schedule_db",
+        "energy_db",
+        "wms",
+    }
+
+
+def _resolve_schedule_data_source(screen_config: dict) -> DataSourceConfig | None:
+    """右屏甘特：优先子页面 schedule 绑定的 database 源；否则回退编码 DB_003。"""
+    ids = _page_binding_data_source_ids(screen_config, "schedule")
+    if ids:
+        src = DataSourceConfig.objects.filter(pk=ids[0], is_enabled=True).first()
+        if src and _is_database_source_type(src.source_type):
+            return src
+    for src in DataSourceConfig.objects.filter(code__iexact="DB_003", is_enabled=True).order_by("id"):
+        if _is_database_source_type(src.source_type):
+            return src
+    return None
+
+
+def _try_mysql_line_schedules_input(area, runtime_parameters: dict, screen_config: dict) -> list[dict] | None:
+    """返回 None 表示不使用 MySQL（回退 ScheduleSnapshot）；返回列表表示已按产线合并订单。"""
+    source = _resolve_schedule_data_source(screen_config)
+    if not source:
+        return None
+    codes = list(
+        ProductionLine.objects.filter(area=area, is_active=True).order_by("code").values_list("code", flat=True),
+    )
+    if not codes:
+        return []
+    try:
+        from .schedule_mysql_source import fetch_mysql_schedule_orders_by_line_codes
+
+        grouped = fetch_mysql_schedule_orders_by_line_codes(
+            source.connection_config or {},
+            list(codes),
+            int(runtime_parameters.get("ganttWindowDays") or 30),
+        )
+    except Exception as exc:
+        logger.warning("甘特 MySQL 数据源查询失败，回退快照", exc_info=True)
+        return None
+    return [{"lineCode": c, "orders": grouped.get(c, [])} for c in codes]
+
+
 ENERGY_CATEGORY_LABELS = {
     1: "照明插座",
     2: "空调",
@@ -1872,7 +1937,8 @@ def _build_area_line_schedules(line_schedules: list[dict], area) -> list[dict]:
     """以产线台账（按当前区域过滤）为基准构造右屏排产产线列表。
 
     - 产线集合、顺序、`lineCode`/`lineName`/`areaName`/`areaCode` 均以 `ProductionLine` 台账为准。
-    - 订单数据通过 `lineCode` 关联到 `ScheduleSnapshot.line_schedules`，无对应快照行的产线返回空 `orders`。
+    - 订单数据通过 `lineCode` 关联：优先 MySQL（DB_003 / 子页面 binding）下发的 `line_schedules`；
+      未启用或查询失败时回退 `ScheduleSnapshot.line_schedules`，无对应行的产线返回空 `orders`。
     """
     snapshot_by_code: dict[str, dict] = {}
     for entry in line_schedules or []:
@@ -1898,6 +1964,24 @@ def _build_area_line_schedules(line_schedules: list[dict], area) -> list[dict]:
                 "orders": list(snapshot_entry.get("orders") or []),
             }
         )
+    return result
+
+
+def _schedule_order_completion_rate_value(order: dict) -> float:
+    raw = order.get("completionRate")
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _drop_completed_schedule_orders_from_gantt(line_schedules: list[dict]) -> list[dict]:
+    """甘特展示前剔除完成率≥100%的工单（视为上游已完工脏数据，不展示）。"""
+    result: list[dict] = []
+    for line in line_schedules:
+        orders = line.get("orders") or []
+        kept = [o for o in orders if _schedule_order_completion_rate_value(o) < 100.0]
+        result.append({**line, "orders": kept})
     return result
 
 
@@ -2057,8 +2141,90 @@ def _build_device_overview_display(total_count: int, running_count: int, abnorma
 
 def _build_schedule_display(window_days: int) -> dict:
     return {
-        "windowDaysLabel": f"{window_days} 天",
+        "windowDaysLabel": f"时间跨度{int(window_days)}天",
     }
+
+
+def _coerce_json_order_date(value) -> date | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return timezone.localdate(value) if timezone.is_aware(value) else value.date()
+    if isinstance(value, date):
+        return value
+    s = str(value).strip()
+    if not s:
+        return None
+    if len(s) >= 10:
+        try:
+            return date.fromisoformat(s[:10])
+        except ValueError:
+            pass
+    parsed = parse_datetime(s)
+    if parsed:
+        return timezone.localdate(parsed) if timezone.is_aware(parsed) else parsed.date()
+    return None
+
+
+def _order_start_date_for_window(order: dict) -> date | None:
+    return _coerce_json_order_date(order.get("displayStartAt")) or _coerce_json_order_date(
+        order.get("plannedStartAt")
+    )
+
+
+def _order_end_date_for_window(order: dict) -> date | None:
+    end = _coerce_json_order_date(order.get("displayEndAt")) or _coerce_json_order_date(order.get("plannedEndAt"))
+    start = _order_start_date_for_window(order)
+    if end is None:
+        return start
+    return end
+
+
+def _normalize_gantt_anchor_mode(value: str | None) -> str:
+    """返回 earliest_order 或 current_time；兼容驼峰键名。"""
+    if not value:
+        return "earliest_order"
+    v = str(value).strip()
+    aliases = {
+        "currentTime": "current_time",
+        "current_time": "current_time",
+        "earliestOrder": "earliest_order",
+        "earliest_order": "earliest_order",
+    }
+    return aliases.get(v, "earliest_order")
+
+
+def _compute_schedule_window_anchor(line_schedules: list[dict], anchor_mode: str | None = None) -> date:
+    """甘特窗口锚点：current_time=当日；earliest_order=各工单计划开始日最早一天。"""
+    mode = anchor_mode or "earliest_order"
+    if mode == "current_time":
+        return timezone.localdate()
+    dates: list[date] = []
+    for line in line_schedules:
+        for order in line.get("orders") or []:
+            d = _order_start_date_for_window(order)
+            if d:
+                dates.append(d)
+    if not dates:
+        return timezone.localdate()
+    return min(dates)
+
+
+def _filter_line_schedules_to_anchor_window(line_schedules: list[dict], anchor: date, window_days: int) -> list[dict]:
+    safe_days = max(int(window_days) or 30, 1)
+    window_end = anchor + timedelta(days=safe_days - 1)
+    result: list[dict] = []
+    for line in line_schedules:
+        kept: list[dict] = []
+        for order in line.get("orders") or []:
+            start_d = _order_start_date_for_window(order)
+            if start_d is None:
+                continue
+            end_d = _order_end_date_for_window(order) or start_d
+            if start_d <= window_end and end_d >= anchor:
+                kept.append(order)
+        result.append({**line, "orders": kept})
+    return result
 
 
 def _build_schedule_order_display(risk_status: str, display_start_at: str, display_end_at: str, completion_rate) -> dict:
@@ -2066,7 +2232,7 @@ def _build_schedule_order_display(risk_status: str, display_start_at: str, displ
     return {
         "riskLabel": risk_display["label"],
         "riskAccent": risk_display["accent"],
-        "timeRangeLabel": f"{display_start_at} - {display_end_at}",
+        "timeRangeLabel": f"{display_start_at} 至 {display_end_at}",
         "completionRateLabel": f"{completion_rate}%",
     }
 

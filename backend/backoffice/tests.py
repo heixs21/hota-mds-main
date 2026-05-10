@@ -1,3 +1,4 @@
+from datetime import date
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -8,10 +9,13 @@ from rest_framework.test import APIClient
 
 from .display_services import (
     DEFAULT_DISPLAY_CONTENT,
+    _compute_schedule_window_anchor,
     _display_parameter_value,
     _format_seconds_hms,
     _map_runtime_status_display,
+    _normalize_gantt_anchor_mode,
     _resolve_machine_panel_status,
+    get_screen_payload,
     load_mock_display_data,
 )
 from .connection_test_services import ConnectionTestResult
@@ -699,14 +703,14 @@ class BackofficeApiTests(TestCase):
             first_order["display"],
             {
                 **risk_display_map[first_order["riskStatus"]],
-                "timeRangeLabel": f"{first_order['displayStartAt']} - {first_order['displayEndAt']}",
+                "timeRangeLabel": f"{first_order['displayStartAt']} 至 {first_order['displayEndAt']}",
                 "completionRateLabel": f"{first_order['completionRate']}%",
             },
         )
         self.assertEqual(
             schedule["display"],
             {
-                "windowDaysLabel": "30 天",
+                "windowDaysLabel": "时间跨度30天",
             },
         )
         risk_summary_items = schedule["riskSummary"]["items"]
@@ -728,6 +732,106 @@ class BackofficeApiTests(TestCase):
                 "lastSuccessfulAtLabel": parse_datetime(response.data["data"]["meta"]["lastSuccessfulAt"]).astimezone().strftime("%Y-%m-%d %H:%M:%S"),
             },
         )
+
+    def test_screen_right_uses_mysql_gantt_when_db003_and_query_ok(self):
+        area = Area.objects.create(code="A-GANTT-MYSQL", name="测试区", is_active=True)
+        ProductionLine.objects.create(code="LINE-GANTT-01", name="测试线", area=area, is_active=True)
+        DataSourceConfig.objects.create(
+            code="DB_003",
+            name="GunT DB",
+            source_type="database",
+            connection_config={
+                "host": "127.0.0.1",
+                "port": 3306,
+                "database": "test",
+                "username": "u",
+                "password": "p",
+            },
+            is_enabled=True,
+        )
+        load_mock_display_data()
+        fake_order = {
+            "orderCode": "MOCK-SO-001",
+            "materialCode": "MAT-X",
+            "materialName": "示例物料",
+            "status": "进行中",
+            "riskStatus": "normal",
+            "targetQuantity": 100,
+            "producedQuantity": 10,
+            "plannedStartAt": "2026-05-10T08:00:00",
+            "plannedEndAt": "2026-05-15T08:00:00",
+            "displayStartAt": "2026-05-10",
+            "displayEndAt": "2026-05-15",
+            "completionRate": 10.0,
+            "display": {
+                "riskLabel": "正常",
+                "riskAccent": "green",
+                "timeRangeLabel": "2026-05-10 至 2026-05-15",
+                "completionRateLabel": "10.0%",
+            },
+        }
+        with patch("backoffice.schedule_mysql_source.fetch_mysql_schedule_orders_by_line_codes") as mock_fetch:
+            mock_fetch.return_value = {"LINE-GANTT-01": [fake_order]}
+            payload = get_screen_payload("right", area.code)
+        schedule = payload["content"]["schedule"]
+        lines = schedule["lineSchedules"]
+        self.assertEqual(len(lines), 1)
+        self.assertEqual(lines[0]["lineCode"], "LINE-GANTT-01")
+        self.assertEqual(lines[0]["orders"][0]["orderCode"], "MOCK-SO-001")
+        mock_fetch.assert_called_once()
+
+    def test_screen_right_excludes_mysql_orders_with_completion_rate_at_least_100(self):
+        area = Area.objects.create(code="A-GANTT-FILTER", name="过滤区", is_active=True)
+        ProductionLine.objects.create(code="LINE-GANTT-FILTER", name="过滤线", area=area, is_active=True)
+        DataSourceConfig.objects.create(
+            code="DB_003",
+            name="GunT DB",
+            source_type="database",
+            connection_config={
+                "host": "127.0.0.1",
+                "port": 3306,
+                "database": "test",
+                "username": "u",
+                "password": "p",
+            },
+            is_enabled=True,
+        )
+        load_mock_display_data()
+        open_order = {
+            "orderCode": "MOCK-OPEN",
+            "materialCode": "MAT-A",
+            "materialName": "在制",
+            "status": "进行中",
+            "riskStatus": "normal",
+            "targetQuantity": 100,
+            "producedQuantity": 50,
+            "plannedStartAt": "2026-05-10T08:00:00",
+            "plannedEndAt": "2026-05-15T08:00:00",
+            "displayStartAt": "2026-05-10",
+            "displayEndAt": "2026-05-15",
+            "completionRate": 50.0,
+            "display": {},
+        }
+        dirty_done = {
+            "orderCode": "MOCK-DIRTY-DONE",
+            "materialCode": "MAT-B",
+            "materialName": "脏完工",
+            "status": "进行中",
+            "riskStatus": "normal",
+            "targetQuantity": 100,
+            "producedQuantity": 100,
+            "plannedStartAt": "2026-05-01T08:00:00",
+            "plannedEndAt": "2026-05-02T08:00:00",
+            "displayStartAt": "2026-05-01",
+            "displayEndAt": "2026-05-02",
+            "completionRate": 100.0,
+            "display": {},
+        }
+        with patch("backoffice.schedule_mysql_source.fetch_mysql_schedule_orders_by_line_codes") as mock_fetch:
+            mock_fetch.return_value = {"LINE-GANTT-FILTER": [dirty_done, open_order]}
+            payload = get_screen_payload("right", area.code)
+        orders = payload["content"]["schedule"]["lineSchedules"][0]["orders"]
+        self.assertEqual([o["orderCode"] for o in orders], ["MOCK-OPEN"])
 
     def test_admin_can_view_data_source_health_snapshots(self):
         load_mock_display_data()
@@ -1098,3 +1202,37 @@ class CncDashboardHelpersTests(TestCase):
         self.assertEqual(_resolve_machine_panel_status(False, 2, 0)["code"], "standby")
         self.assertEqual(_resolve_machine_panel_status(False, 1, 0)["code"], "alarm")
         self.assertEqual(_resolve_machine_panel_status(False, 5, 0)["code"], "alarm")
+
+
+class ScheduleGanttAnchorModeTests(TestCase):
+    def test_normalize_gantt_anchor_mode_aliases(self):
+        self.assertEqual(_normalize_gantt_anchor_mode(None), "earliest_order")
+        self.assertEqual(_normalize_gantt_anchor_mode(""), "earliest_order")
+        self.assertEqual(_normalize_gantt_anchor_mode("currentTime"), "current_time")
+        self.assertEqual(_normalize_gantt_anchor_mode("earliestOrder"), "earliest_order")
+        self.assertEqual(_normalize_gantt_anchor_mode("bogus"), "earliest_order")
+
+    def test_compute_anchor_current_time_uses_local_today(self):
+        line_schedules = [{"orders": [{"displayStartAt": "2020-01-05"}]}]
+        with patch("backoffice.display_services.timezone.localdate", return_value=date(2026, 5, 10)):
+            self.assertEqual(
+                _compute_schedule_window_anchor(line_schedules, "current_time"),
+                date(2026, 5, 10),
+            )
+
+    def test_compute_anchor_earliest_order_uses_min_start(self):
+        line_schedules = [
+            {"orders": [{"displayStartAt": "2021-03-01"}, {"displayStartAt": "2020-01-05"}]},
+        ]
+        self.assertEqual(
+            _compute_schedule_window_anchor(line_schedules, "earliest_order"),
+            date(2020, 1, 5),
+        )
+
+    def test_screen_schedule_payload_includes_gantt_anchor_mode(self):
+        area = Area.objects.create(code="A-GANTT-MODE", name="锚点测试区", is_active=True)
+        ProductionLine.objects.create(code="L-GANTT-MODE", name="线", area=area, is_active=True)
+        load_mock_display_data()
+        payload = get_screen_payload("right", area.code)
+        schedule = payload["content"]["schedule"]
+        self.assertIn(schedule["ganttAnchorMode"], ("earliest_order", "current_time"))
