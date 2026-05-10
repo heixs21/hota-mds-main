@@ -16,12 +16,23 @@
 
 补充参考文档：
 
+- `docs/DATA_REALITY.md`（真实接入 vs mock / 占位对照）
 - `docs/API_CONTRACT.md`
 - `docs/DB_MODEL_DRAFT.md`
 - `docs/IMPLEMENTATION_PLAN.md`
 - `DOCS_OVERVIEW.md`
 
 ## 当前阶段
+
+### 数据真实性（真实 vs Mock）
+
+| 类型 | 模块 |
+|------|------|
+| **可接真实外部/实时数据** | 右屏甘特（配置排产 MySQL 成功时）；左屏「设备实时监控」（OPC UA）；左屏「能耗数据」子页（`/api/energy-dashboard` + 能耗库）；设备概览计数（台账 + 数据源连通探测） |
+| **默认仍为快照 / mock** | 产量概览与趋势、左屏嵌入的「区域能耗」卡片（`load_mock_screen_data` 等写入的快照） |
+| **占位** | 报修区、3D 仿真；路由根路径 `PlaceholderScreen` |
+
+细则见 **`docs/DATA_REALITY.md`**。
 
 当前已完成：
 
@@ -39,7 +50,7 @@
 
 当前未完成：
 
-- `M5` 真实外部系统接入
+- `M5` 全量真实接入与验收（产量/快照能耗自动化采集、SAP 等尚未贯通时可视为进行中）
 - 报修真实接入
 - 3D 仿真真实开发
 - 二期内部 Web 报表
@@ -79,8 +90,8 @@
 | `http://localhost:8000/api/admin/auth/login` | 后台管理员登录 API（M2） |
 | `http://localhost:8000/api/admin/auth/me` | 当前管理员信息 API（M2） |
 | `http://localhost:8000/api/admin/data-source-healths` | 数据源健康状态 API（M3/M4 运维查看） |
-| `http://localhost:3000/screen/left` | 左屏展示页（M4） |
-| `http://localhost:3000/screen/right` | 右屏展示页（M4） |
+| `http://localhost:3000/screen/{areaCode}/left` | 左屏展示页，`areaCode` 为区域编码（例：`05`） |
+| `http://localhost:3000/screen/{areaCode}/right` | 右屏展示页 |
 | `http://localhost:3000/admin/login` | 后台登录页 |
 | `http://localhost:3000/admin/console` | 后台控制台 |
 
@@ -102,8 +113,8 @@ docker compose up --build
 1. 打开路由验证服务
 
 - 后端健康检查：`http://localhost:8000/api/health`
-- 左屏页面：`http://localhost:3000/screen/left`
-- 右屏页面：`http://localhost:3000/screen/right`
+- 左屏页面：`http://localhost:3000/screen/05/left`（将 `05` 换成后台已有区域编码）
+- 右屏页面：`http://localhost:3000/screen/05/right`
 - 后台登录页：`http://localhost:3000/admin/login`
 
 ## 本地开发
