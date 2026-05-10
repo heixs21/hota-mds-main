@@ -79,8 +79,8 @@
 |------|------|------|
 | `welcome` | object | `companyName`、`welcomeMessage`、`logoUrl`、`promoImageUrls`、`currentTime`（服务端生成） |
 | `deviceOverview` | object | 设备汇总快照 + 展示字段（见下） |
-| `productionOverview` | object | 产量总览：`totalTargetQuantity`、`totalProducedQuantity`、`overallCompletionRate`、`lineSummaries`、`display` |
-| `productionTrend` | array | 产量趋势点：`hourLabel`、`producedQuantity`、`display` |
+| `productionOverview` | object | 产量总览：`totalTargetQuantity`、`totalProducedQuantity`、`overallCompletionRate`、`lineSummaries`、`display`；另含 **`productionMetricsSource`**：`schedule_database` 表示由排产 MySQL 汇总，`snapshot` 表示回退产量快照（与右屏甘特同源配置，见 `docs/DATA_REALITY.md`） |
+| `productionTrend` | array | 产量趋势点：`hourLabel`、`producedQuantity`、`display`（当前仍来自产量快照，与概览数据源独立） |
 | `energyOverview` | object | `totalConsumption`、`unit`、`areaSummaries`、`display` |
 | `repairPlaceholder` | object | 占位模块：`title`、`description`、`enabled` |
 
