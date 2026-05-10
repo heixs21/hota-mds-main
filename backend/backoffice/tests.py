@@ -664,7 +664,13 @@ class BackofficeApiTests(TestCase):
 
     def test_screen_right_api_keeps_last_successful_data_when_failure_occurs(self):
         area = Area.objects.create(code="A-SCREEN-R", name="总装区", is_active=True)
-        ProductionLine.objects.create(code="L-SCREEN-R", name="右屏线", area=area, is_active=True)
+        for index in range(1, 13):
+            ProductionLine.objects.create(
+                code=f"L-SCREEN-R-{index:02d}",
+                name=f"右屏线 {index:02d}",
+                area=area,
+                is_active=True,
+            )
         initial_result = load_mock_display_data()
         initial_generated_at = initial_result["snapshots"]["schedule"]["generatedAt"]
 

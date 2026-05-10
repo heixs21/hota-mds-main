@@ -224,7 +224,7 @@ def get_screen_payload(screen_key: str, area_code: str | None = None) -> dict:
             }
         )
     else:
-        filtered_line_schedules = _filter_line_schedules_by_area(schedule_snapshot.line_schedules, area)
+        filtered_line_schedules = _build_area_line_schedules(schedule_snapshot.line_schedules, area)
         risk_counts = _build_risk_counts(filtered_line_schedules)
         payload["content"].update(
             {
@@ -1868,9 +1868,37 @@ def _filter_line_summaries_by_area(line_summaries: list[dict], area) -> list[dic
     return filtered
 
 
-def _filter_line_schedules_by_area(line_schedules: list[dict], area) -> list[dict]:
-    filtered = [item for item in line_schedules if (item.get("areaName") or "") == area.name]
-    return filtered
+def _build_area_line_schedules(line_schedules: list[dict], area) -> list[dict]:
+    """以产线台账（按当前区域过滤）为基准构造右屏排产产线列表。
+
+    - 产线集合、顺序、`lineCode`/`lineName`/`areaName`/`areaCode` 均以 `ProductionLine` 台账为准。
+    - 订单数据通过 `lineCode` 关联到 `ScheduleSnapshot.line_schedules`，无对应快照行的产线返回空 `orders`。
+    """
+    snapshot_by_code: dict[str, dict] = {}
+    for entry in line_schedules or []:
+        code = entry.get("lineCode")
+        if code:
+            snapshot_by_code[code] = entry
+
+    ledger_lines = (
+        ProductionLine.objects.filter(area=area, is_active=True)
+        .select_related("area")
+        .order_by("code")
+    )
+
+    result: list[dict] = []
+    for pl in ledger_lines:
+        snapshot_entry = snapshot_by_code.get(pl.code) or {}
+        result.append(
+            {
+                "lineCode": pl.code,
+                "lineName": pl.name,
+                "areaCode": area.code,
+                "areaName": area.name,
+                "orders": list(snapshot_entry.get("orders") or []),
+            }
+        )
+    return result
 
 
 def _build_risk_counts(line_schedules: list[dict]) -> dict:

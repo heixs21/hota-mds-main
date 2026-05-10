@@ -554,7 +554,7 @@ function usePageRotation(pages, rotationIntervalSeconds) {
   return [activePageIndex, setActivePageIndex];
 }
 
-function useAutoVerticalScroll(containerRef, enabled) {
+function useAutoVerticalScroll(containerRef, enabled, intervalMs = 40) {
   useEffect(() => {
     if (!enabled) {
       return undefined;
@@ -578,14 +578,14 @@ function useAutoVerticalScroll(containerRef, enabled) {
       }
 
       element.scrollTop = nextScrollTop;
-    }, 40);
+    }, intervalMs);
 
     return () => window.clearInterval(timerId);
-  }, [containerRef, enabled]);
+  }, [containerRef, enabled, intervalMs]);
 }
 
 /** When `active`, observes container size and auto-scrolls only if content overflows (vertical marquee). */
-function useOverflowAutoScroll(containerRef, active) {
+function useOverflowAutoScroll(containerRef, active, intervalMs = 40) {
   const [isOverflowing, setIsOverflowing] = useState(false);
 
   useEffect(() => {
@@ -610,7 +610,7 @@ function useOverflowAutoScroll(containerRef, active) {
     return () => ro.disconnect();
   }, [containerRef, active]);
 
-  useAutoVerticalScroll(containerRef, isOverflowing);
+  useAutoVerticalScroll(containerRef, isOverflowing, intervalMs);
 
   return isOverflowing;
 }
@@ -1139,7 +1139,8 @@ function GanttBoard({ lineSchedules, schedule }) {
   const windowStart = windowDates[0] ? startOfDay(windowDates[0]) : startOfDay(new Date());
   const scrollRef = useRef(null);
   const rowsActive = lineSchedules.length > 0;
-  const rowsOverflowing = useOverflowAutoScroll(scrollRef, rowsActive);
+  /* 甘特产线列表超量滚动：步长 1px，间隔 60ms（原 40ms 的 2/3 速度） */
+  const rowsOverflowing = useOverflowAutoScroll(scrollRef, rowsActive, 60);
   const totalOrders = lineSchedules.reduce((count, line) => count + (line.orders?.length ?? 0), 0);
 
   return (
@@ -1179,9 +1180,8 @@ function GanttBoard({ lineSchedules, schedule }) {
                 <article className="gantt-row" key={line.lineCode}>
                   <div className="gantt-line-meta">
                     <strong>{line.lineName}</strong>
-                    <span>{line.lineCode}</span>
                     <span>{line.areaName || "演示区域"}</span>
-                    <span>{`可见订单 ${visibleOrders.length} 单`}</span>
+                    <span className="gantt-line-meta-window">{`未来${windowDays}天已安排 ${line.orders?.length ?? 0} 个工单`}</span>
                   </div>
                   <div className="gantt-track-shell">
                     <div className="gantt-track" style={{ "--gantt-window-days": windowDays, minHeight: `${rowHeight}px` }}>
@@ -1315,7 +1315,7 @@ function RightScreen({ payload, errorMessage, fullscreenState, screenRef }) {
     schedule: (
       <section className="screen-panel panel-span-8 schedule-panel" key="schedule">
         <div className="panel-header">
-          <h2>未完工订单排产展示</h2>
+          <h2>{meta.areaName ? `${meta.areaName}工单甘特图` : "工单甘特图"}</h2>
           <span>未来窗口 {scheduleDisplay.windowDaysLabel || `${formatNumber(schedule.windowDays)} 天`}</span>
         </div>
         {riskItems.length > 0 ? (
