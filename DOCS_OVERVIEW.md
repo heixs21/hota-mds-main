@@ -7,12 +7,13 @@
 1. `docs/SPEC.md`
 2. `docs/PLAN.md`
 3. `docs/STATUS.md`
-4. `docs/HANDOFF.md`
-5. `docs/DECISIONS.md`
-6. `docs/IMPLEMENTATION_PLAN.md`
-7. `docs/API_CONTRACT.md`
-8. `docs/DB_MODEL_DRAFT.md`
-9. `docs/AGENTS.md`
+4. **`docs/DATA_REALITY.md`**（真实数据 vs mock/占位，与验收演示强相关）
+5. `docs/HANDOFF.md`
+6. `docs/DECISIONS.md`
+7. `docs/IMPLEMENTATION_PLAN.md`
+8. `docs/API_CONTRACT.md`
+9. `docs/DB_MODEL_DRAFT.md`
+10. `docs/AGENTS.md`
 
 ## 各文档作用
 
@@ -58,6 +59,18 @@
 - 接手项目时
 - 每轮开发开始前
 - 想快速了解当前最新进展时
+
+### `docs/DATA_REALITY.md`
+
+数据真实性矩阵。
+
+作用：
+- 标明各大屏模块、后台能力当前是**真实外部/实时数据**、**本库快照与 mock**，还是**纯占位**
+- 区分左屏「嵌入能耗」与「能耗数据子页」等不同数据链路，避免演示误判
+
+适合什么时候看：
+- 对接现场数据源或验收演示前
+- 判断某一屏上的数字是否代表真实业务库时
 
 ### `docs/HANDOFF.md`
 
@@ -147,6 +160,7 @@
 - `SPEC.md`：定义做什么
 - `PLAN.md`：定义按什么阶段做
 - `STATUS.md`：记录现在做到哪里
+- `DATA_REALITY.md`：标注真实数据与 mock/占位边界
 - `HANDOFF.md`：告诉下一位怎么接着做
 - `DECISIONS.md`：记录为什么这样做
 - `IMPLEMENTATION_PLAN.md`：把阶段计划拆成执行任务

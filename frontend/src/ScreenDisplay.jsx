@@ -132,6 +132,26 @@ function formatNumber(value) {
   return new Intl.NumberFormat("zh-CN").format(Number(value));
 }
 
+/** 产线卡片时间兜底：仅展示 YYYY-MM-DD */
+function formatScreenDateOnly(value) {
+  if (value == null || value === "") {
+    return "-";
+  }
+  const s = String(value).trim();
+  const head = s.slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(head)) {
+    return head;
+  }
+  const t = new Date(s);
+  if (Number.isNaN(t.getTime())) {
+    return "-";
+  }
+  const y = t.getFullYear();
+  const m = String(t.getMonth() + 1).padStart(2, "0");
+  const d = String(t.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
 function formatRpm(value) {
   if (value === null || value === undefined || value === "") {
     return "--";
@@ -377,9 +397,10 @@ function startOfDay(value) {
   return date;
 }
 
-function buildWindowDays(windowDays) {
+function buildWindowDays(windowDays, anchorIsoDate) {
   const safeWindowDays = Math.max(Number(windowDays) || 30, 1);
-  const windowStart = startOfDay(new Date()) ?? new Date();
+  const fromAnchor = anchorIsoDate ? startOfDay(anchorIsoDate) : null;
+  const windowStart = fromAnchor ?? startOfDay(new Date()) ?? new Date();
   return Array.from({ length: safeWindowDays }, (_, index) => {
     return new Date(windowStart.getTime() + index * DAY_MS);
   });
@@ -437,6 +458,142 @@ function getGanttBarDensity(layout) {
   }
 
   return "full";
+}
+
+/** 完成率≥100% 视为上游已完工脏数据，不展示在甘特上（与后端过滤一致） */
+function isScheduleOrderExcludedAsUpstreamCompleted(order) {
+  const rateRaw = Number(order?.completionRate);
+  if (!Number.isFinite(rateRaw)) {
+    return false;
+  }
+  return rateRaw >= 100;
+}
+
+/** 计划结束日早于今日且未满进度 → 超时未完成（未完成部分用红色底） */
+function parseOrderPlanEndDay(order) {
+  const raw = order?.displayEndAt ?? order?.plannedEndAt;
+  if (raw == null || raw === "") {
+    return null;
+  }
+  const s = String(raw);
+  const dayPart = s.length >= 10 ? s.slice(0, 10) : s;
+  return startOfDay(dayPart);
+}
+
+function isScheduleOrderOverdueIncomplete(order) {
+  if (isScheduleOrderExcludedAsUpstreamCompleted(order)) {
+    return false;
+  }
+  const rateRaw = Number(order?.completionRate);
+  const rate = Number.isFinite(rateRaw) ? rateRaw : 0;
+  if (rate >= 99.99) {
+    return false;
+  }
+  const endDay = parseOrderPlanEndDay(order);
+  if (!endDay) {
+    return false;
+  }
+  const today = startOfDay(new Date());
+  if (!today) {
+    return false;
+  }
+  return endDay.getTime() < today.getTime();
+}
+
+/** 甘特条底色：未开始全蓝；进行中左侧绿、右侧蓝（未完成）；超时未完成未完成侧红底、已完成侧黄；完工全绿；暂停灰 */
+function getGanttScheduleVisual(order) {
+  const status = String(order.status ?? "").trim();
+  const risk = order.riskStatus ?? "normal";
+  const rateRaw = Number(order.completionRate);
+  const rate = Number.isFinite(rateRaw) ? Math.min(100, Math.max(0, rateRaw)) : 0;
+  const stLower = status.toLowerCase();
+  const overdueIncomplete = isScheduleOrderOverdueIncomplete(order);
+
+  const isPaused = risk === "paused" || /暂停|paused/i.test(status);
+  if (isPaused) {
+    return { variant: "paused", completedPct: rate, risk, overdueIncomplete: false };
+  }
+
+  const looksDone = rate >= 99.99 || /完成|完工|结案|关闭/i.test(status);
+  if (looksDone) {
+    return { variant: "green_full", completedPct: 100, risk, overdueIncomplete: false };
+  }
+
+  const looksInProgress =
+    /进行|执行|生产中|在制|加工中/i.test(status) ||
+    stLower === "in_progress" ||
+    stLower === "processing";
+
+  /* 有完成率则一律按 split 展示进度条，避免上游仍标 planned/未开始却已有产量时整根单色 */
+  const looksNotStarted =
+    rate === 0 &&
+    (stLower === "planned" ||
+      /未开始|待开始/i.test(status) ||
+      !looksInProgress);
+
+  if (looksNotStarted) {
+    return {
+      variant: overdueIncomplete ? "red_full" : "blue_full",
+      completedPct: 0,
+      risk,
+      overdueIncomplete,
+    };
+  }
+
+  return { variant: "split", completedPct: rate, risk, overdueIncomplete };
+}
+
+function ganttBarRiskClass(risk) {
+  if (!risk || risk === "normal") {
+    return "";
+  }
+  return `gantt-bar--risk-${risk}`;
+}
+
+function formatGanttMaterialLine(order) {
+  const code = order.materialCode ?? "";
+  const name = order.materialName ?? "";
+  const c = String(code).trim();
+  const n = String(name).trim();
+  if (c && n) {
+    return `${c} ${n}`;
+  }
+  return c || n || "-";
+}
+
+function formatGanttDateRange(order, display) {
+  const label = display.timeRangeLabel;
+  if (typeof label === "string" && label.includes("至")) {
+    return label;
+  }
+  const a = order.displayStartAt ?? "";
+  const b = order.displayEndAt ?? "";
+  if (a && b) {
+    return `${a} 至 ${b}`;
+  }
+  return label || "";
+}
+
+function ganttCompletionLabel(display, order) {
+  return display.completionRateLabel || `${order.completionRate ?? "-"}%`;
+}
+
+function ganttOrderSortKey(order) {
+  const raw = order.plannedStartAt ?? order.displayStartAt;
+  if (!raw) {
+    return 0;
+  }
+  const t = new Date(raw).getTime();
+  return Number.isNaN(t) ? 0 : t;
+}
+
+function compareGanttOrders(a, b) {
+  const da = ganttOrderSortKey(a.order);
+  const db = ganttOrderSortKey(b.order);
+  if (da !== db) {
+    return da - db;
+  }
+  return String(a.order.orderCode ?? "").localeCompare(String(b.order.orderCode ?? ""), "zh-CN");
 }
 
 function resolveConfiguredPages(screenKey, pageKeys) {
@@ -554,7 +711,7 @@ function usePageRotation(pages, rotationIntervalSeconds) {
   return [activePageIndex, setActivePageIndex];
 }
 
-function useAutoVerticalScroll(containerRef, enabled) {
+function useAutoVerticalScroll(containerRef, enabled, intervalMs = 40) {
   useEffect(() => {
     if (!enabled) {
       return undefined;
@@ -578,14 +735,14 @@ function useAutoVerticalScroll(containerRef, enabled) {
       }
 
       element.scrollTop = nextScrollTop;
-    }, 40);
+    }, intervalMs);
 
     return () => window.clearInterval(timerId);
-  }, [containerRef, enabled]);
+  }, [containerRef, enabled, intervalMs]);
 }
 
 /** When `active`, observes container size and auto-scrolls only if content overflows (vertical marquee). */
-function useOverflowAutoScroll(containerRef, active) {
+function useOverflowAutoScroll(containerRef, active, intervalMs = 40) {
   const [isOverflowing, setIsOverflowing] = useState(false);
 
   useEffect(() => {
@@ -610,7 +767,7 @@ function useOverflowAutoScroll(containerRef, active) {
     return () => ro.disconnect();
   }, [containerRef, active]);
 
-  useAutoVerticalScroll(containerRef, isOverflowing);
+  useAutoVerticalScroll(containerRef, isOverflowing, intervalMs);
 
   return isOverflowing;
 }
@@ -739,6 +896,8 @@ function LeftScreen({ payload, errorMessage, fullscreenState, screenRef }) {
   const lineSummaries = productionOverview.lineSummaries ?? [];
   const areaSummaries = energyOverview.areaSummaries ?? [];
   const productionDisplay = productionOverview.display ?? {};
+  const ledgerLineCount =
+    productionOverview.ledgerProductionLineCount != null ? productionOverview.ledgerProductionLineCount : lineSummaries.length;
   const energyDisplay = energyOverview.display ?? {};
   const deviceDisplay = deviceOverview.display ?? {};
   const moduleSettings = screen.moduleSettings ?? {};
@@ -809,10 +968,7 @@ function LeftScreen({ payload, errorMessage, fullscreenState, screenRef }) {
       <section className="screen-panel panel-span-4 production-overview-panel" key="productionOverview">
         <div className="panel-header">
           <h2>产量执行概览</h2>
-          <span>
-            {`产线 ${lineSummaries.length} 条`}
-            {lineListOverflowing ? " · 自动滚动中" : ""}
-          </span>
+          <span>{`产线 ${ledgerLineCount} 条`}</span>
         </div>
         <div className="metric-grid metric-grid-two">
           <MetricTile
@@ -869,8 +1025,11 @@ function LeftScreen({ payload, errorMessage, fullscreenState, screenRef }) {
                     </span>
                   </div>
                   <div className="line-summary-timeline">
-                    <span>{itemDisplay.plannedRangeLabel || `${item.plannedStartAt || "-"} - ${item.plannedEndAt || "-"}`}</span>
-                    <span>{`预计完成 ${itemDisplay.estimatedCompletionLabel || item.estimatedCompletionAt || "-"}`}</span>
+                    <span>
+                      {itemDisplay.plannedRangeLabel ||
+                        `${formatScreenDateOnly(item.plannedStartAt)} - ${formatScreenDateOnly(item.plannedEndAt)}`}
+                    </span>
+                    <span>{`预计完成 ${itemDisplay.estimatedCompletionLabel || formatScreenDateOnly(item.estimatedCompletionAt)}`}</span>
                   </div>
                 </article>
               );
@@ -1135,23 +1294,19 @@ function GanttBoard({ lineSchedules, schedule }) {
   const barTopOffset = 10;
   const rowBottomPadding = 18;
   const windowDays = Math.max(Number(schedule?.windowDays) || 30, 1);
-  const windowDates = useMemo(() => buildWindowDays(windowDays), [windowDays]);
+  const windowAnchorDate = schedule?.windowAnchorDate;
+  const windowDates = useMemo(
+    () => buildWindowDays(windowDays, windowAnchorDate),
+    [windowDays, windowAnchorDate],
+  );
   const windowStart = windowDates[0] ? startOfDay(windowDates[0]) : startOfDay(new Date());
   const scrollRef = useRef(null);
   const rowsActive = lineSchedules.length > 0;
-  const rowsOverflowing = useOverflowAutoScroll(scrollRef, rowsActive);
-  const totalOrders = lineSchedules.reduce((count, line) => count + (line.orders?.length ?? 0), 0);
+  /* 甘特产线列表超量滚动：步长 1px，间隔 60ms（原 40ms 的 2/3 速度） */
+  useOverflowAutoScroll(scrollRef, rowsActive, 60);
 
   return (
     <div className="gantt-shell">
-      <div className="gantt-meta">
-        <span>按产线分组</span>
-        <span>{`产线 ${lineSchedules.length} 条`}</span>
-        <span>{`订单 ${totalOrders} 单`}</span>
-        <span>{schedule?.display?.windowDaysLabel || `${windowDays} 天窗口`}</span>
-        <span>{rowsOverflowing ? "超量自动纵向滚动中" : "窗口内静态展示"}</span>
-      </div>
-
       <div className="gantt-board">
         <div className="gantt-days">
           <div className="gantt-days-spacer">产线</div>
@@ -1168,20 +1323,22 @@ function GanttBoard({ lineSchedules, schedule }) {
           {lineSchedules.length > 0 ? (
             lineSchedules.map((line) => {
               const visibleOrders = (line.orders ?? [])
+                .filter((order) => !isScheduleOrderExcludedAsUpstreamCompleted(order))
                 .map((order) => {
                   const layout = getGanttBarLayout(order, windowStart, windowDays);
                   return layout ? { order, layout } : null;
                 })
-                .filter(Boolean);
-              const rowHeight = Math.max(visibleOrders.length, 1) * barSlotHeight + barTopOffset + rowBottomPadding;
+                .filter(Boolean)
+                .sort(compareGanttOrders);
+              /* 两条纵向轨道交替：按时间排序后第 1、3、5… 在上轨，第 2、4、6… 在下轨，限制每条产线最多两行高度 */
+              const laneCount = visibleOrders.length <= 1 ? 1 : 2;
+              const rowHeight = laneCount * barSlotHeight + barTopOffset + rowBottomPadding;
 
               return (
                 <article className="gantt-row" key={line.lineCode}>
                   <div className="gantt-line-meta">
                     <strong>{line.lineName}</strong>
-                    <span>{line.lineCode}</span>
                     <span>{line.areaName || "演示区域"}</span>
-                    <span>{`可见订单 ${visibleOrders.length} 单`}</span>
                   </div>
                   <div className="gantt-track-shell">
                     <div className="gantt-track" style={{ "--gantt-window-days": windowDays, minHeight: `${rowHeight}px` }}>
@@ -1194,56 +1351,79 @@ function GanttBoard({ lineSchedules, schedule }) {
                         {visibleOrders.length > 0 ? (
                           visibleOrders.map(({ order, layout }, orderIndex) => {
                             const display = order.display ?? {};
-                            const accent = display.riskAccent ?? "muted";
                             const density = getGanttBarDensity(layout);
-                            const barClassName = ["gantt-bar", `accent-${accent}`, `gantt-bar--${density}`]
+                            const viz = getGanttScheduleVisual(order);
+                            const barClassName = ["gantt-bar", `gantt-bar--${density}`, `gantt-bar--viz-${viz.variant}`, ganttBarRiskClass(viz.risk)]
                               .filter(Boolean)
                               .join(" ");
-                            const barTitle = [
-                              order.orderCode,
-                              order.materialCode || "-",
-                              display.timeRangeLabel || `${order.displayStartAt} - ${order.displayEndAt}`,
-                              display.completionRateLabel || `${order.completionRate ?? "-"}%`,
-                            ].join(" | ");
+                            const completionLabel = ganttCompletionLabel(display, order);
+                            const lane = orderIndex % 2;
+                            const topPx = barTopOffset + lane * barSlotHeight;
 
                             return (
                               <div
                                 className={barClassName}
-                                key={`${line.lineCode}-${order.orderCode}`}
+                                key={`${line.lineCode}-${order.orderCode}-${orderIndex}`}
                                 style={{
                                   left: `${layout.leftPercent}%`,
-                                  top: `${orderIndex * barSlotHeight + barTopOffset}px`,
+                                  top: `${topPx}px`,
                                   width: `${layout.widthPercent}%`,
                                 }}
-                                title={barTitle}
                               >
-                                {density === "tiny" ? (
-                                  <div className="gantt-bar-mini">
-                                    <strong>{order.orderCode}</strong>
-                                  </div>
-                                ) : density === "compact" ? (
-                                  <div className="gantt-bar-compact">
-                                    <strong>{order.orderCode}</strong>
-                                  </div>
-                                ) : (
-                                  <>
-                                    <div className="gantt-bar-head">
+                                <div className="gantt-bar-paint-stack" aria-hidden="true">
+                                  {viz.variant === "blue_full" ? <span className="gantt-bar-paint gantt-bar-paint--blue" /> : null}
+                                  {viz.variant === "red_full" ? <span className="gantt-bar-paint gantt-bar-paint--red" /> : null}
+                                  {viz.variant === "green_full" ? <span className="gantt-bar-paint gantt-bar-paint--green" /> : null}
+                                  {viz.variant === "paused" ? <span className="gantt-bar-paint gantt-bar-paint--paused" /> : null}
+                                  {viz.variant === "split" ? (
+                                    <>
+                                      <span
+                                        className={
+                                          viz.overdueIncomplete
+                                            ? "gantt-bar-paint gantt-bar-paint--red gantt-bar-paint--base"
+                                            : "gantt-bar-paint gantt-bar-paint--blue gantt-bar-paint--base"
+                                        }
+                                      />
+                                      <span
+                                        className={
+                                          viz.overdueIncomplete
+                                            ? "gantt-bar-paint gantt-bar-paint--yellow gantt-bar-paint--progress gantt-bar-paint--progress-cover"
+                                            : "gantt-bar-paint gantt-bar-paint--green gantt-bar-paint--progress"
+                                        }
+                                        style={{ width: viz.completedPct <= 0 ? 0 : `${viz.completedPct}%` }}
+                                      />
+                                    </>
+                                  ) : null}
+                                </div>
+                                <div className={`gantt-bar-content gantt-bar-content--${density}`}>
+                                  <span className="gantt-bar-completion-corner">{completionLabel}</span>
+                                  {density === "tiny" ? (
+                                    <div className="gantt-bar-mini">
                                       <strong>{order.orderCode}</strong>
                                     </div>
-                                    <div className="gantt-bar-body">
-                                      <span>{order.materialCode || "-"}</span>
-                                      <span>{display.completionRateLabel || `${order.completionRate ?? "-"}%`}</span>
+                                  ) : density === "compact" ? (
+                                    <div className="gantt-bar-compact">
+                                      <strong>{order.orderCode}</strong>
                                     </div>
-                                    <div className="gantt-bar-foot">
-                                      <span>{display.timeRangeLabel || `${order.displayStartAt} - ${order.displayEndAt}`}</span>
-                                    </div>
-                                  </>
-                                )}
+                                  ) : (
+                                    <>
+                                      <div className="gantt-bar-head">
+                                        <strong className="gantt-bar-order-no">{order.orderCode}</strong>
+                                      </div>
+                                      <div className="gantt-bar-body gantt-bar-body--material">
+                                        <span className="gantt-bar-material-line">{formatGanttMaterialLine(order)}</span>
+                                      </div>
+                                      <div className="gantt-bar-foot">
+                                        <span className="gantt-bar-date-range">{formatGanttDateRange(order, display)}</span>
+                                      </div>
+                                    </>
+                                  )}
+                                </div>
                               </div>
                             );
                           })
                       ) : (
-                        <div className="gantt-empty-row">当前产线在未来窗口内无可见订单</div>
+                        <div className="gantt-empty-row">当前产线在时间跨度内无可见订单</div>
                       )}
                     </div>
                   </div>
@@ -1259,6 +1439,128 @@ function GanttBoard({ lineSchedules, schedule }) {
   );
 }
 
+function aggregateScheduleOverview(lineSchedules) {
+  let totalTarget = 0;
+  let totalProduced = 0;
+  let orderCount = 0;
+  const materialMap = new Map();
+
+  for (const line of lineSchedules ?? []) {
+    for (const order of line.orders ?? []) {
+      if (isScheduleOrderExcludedAsUpstreamCompleted(order)) {
+        continue;
+      }
+      orderCount += 1;
+      const t = Number(order.targetQuantity);
+      const p = Number(order.producedQuantity);
+      const tt = Number.isFinite(t) ? t : 0;
+      const pp = Number.isFinite(p) ? p : 0;
+      totalTarget += tt;
+      totalProduced += pp;
+      const code = String(order.materialCode ?? "").trim() || "-";
+      const name = String(order.materialName ?? "").trim();
+      const key = `${code}\u0000${name}`;
+      const cur = materialMap.get(key) ?? {
+        materialCode: code,
+        materialName: name,
+        targetQuantity: 0,
+        producedQuantity: 0,
+        orderCount: 0,
+      };
+      cur.targetQuantity += tt;
+      cur.producedQuantity += pp;
+      cur.orderCount += 1;
+      materialMap.set(key, cur);
+    }
+  }
+
+  const materials = Array.from(materialMap.values()).sort((a, b) => {
+    if (b.targetQuantity !== a.targetQuantity) {
+      return b.targetQuantity - a.targetQuantity;
+    }
+    return b.orderCount - a.orderCount;
+  });
+
+  const completionPct =
+    totalTarget > 0 ? Math.min(100, Math.round((totalProduced / totalTarget) * 10000) / 100) : 0;
+
+  return { totalTarget, totalProduced, completionPct, materials, orderCount };
+}
+
+function ScheduleOverviewSide({ areaName, riskItems, lineSchedules }) {
+  const stats = useMemo(() => aggregateScheduleOverview(lineSchedules), [lineSchedules]);
+  const topMaterials = useMemo(() => stats.materials.slice(0, 8), [stats.materials]);
+
+  return (
+    <section className="screen-panel panel-span-4 placeholder-panel schedule-overview-side-panel">
+      <div className="panel-header">
+        <h2>{areaName ? `${areaName}工单信息总览` : "工单信息总览"}</h2>
+      </div>
+      <div className="schedule-overview-side-body">
+        {riskItems.length > 0 ? (
+          <div className="risk-summary-row risk-summary-row--overview">
+            {riskItems.map((item) => (
+              <article className={`risk-summary-tile accent-${item.accent}`} key={item.key}>
+                <span>{item.label}</span>
+                <strong>{item.countLabel || formatNumber(item.count)}</strong>
+              </article>
+            ))}
+          </div>
+        ) : null}
+
+        <div className="schedule-overview-section">
+          <h3 className="schedule-overview-section-title">窗口内工单产量</h3>
+          {stats.orderCount === 0 ? (
+            <p className="schedule-overview-empty">当前窗口内无可汇总工单。</p>
+          ) : (
+            <dl className="schedule-overview-metrics">
+              <div className="schedule-overview-metric">
+                <dt>工单数</dt>
+                <dd>{formatNumber(stats.orderCount)}</dd>
+              </div>
+              <div className="schedule-overview-metric">
+                <dt>目标产量</dt>
+                <dd>{formatNumber(stats.totalTarget)}</dd>
+              </div>
+              <div className="schedule-overview-metric">
+                <dt>已产数量</dt>
+                <dd>{formatNumber(stats.totalProduced)}</dd>
+              </div>
+              <div className="schedule-overview-metric">
+                <dt>产量完成率</dt>
+                <dd>{`${stats.completionPct}%`}</dd>
+              </div>
+            </dl>
+          )}
+        </div>
+
+        <div className="schedule-overview-section">
+          <h3 className="schedule-overview-section-title">工单产成品统计</h3>
+          {topMaterials.length === 0 ? (
+            <p className="schedule-overview-empty">暂无物料维度数据。</p>
+          ) : (
+            <ul className="schedule-overview-material-list">
+              {topMaterials.map((m, index) => (
+                <li key={`${m.materialCode}-${m.materialName}-${index}`}>
+                  <span
+                    className="schedule-overview-material-line"
+                    title={`${m.materialCode} ${m.materialName}`.trim()}
+                  >
+                    {formatGanttMaterialLine({ materialCode: m.materialCode, materialName: m.materialName })}
+                  </span>
+                  <span className="schedule-overview-material-qty">
+                    {formatNumber(m.producedQuantity)} / {formatNumber(m.targetQuantity)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function RightScreen({ payload, errorMessage, fullscreenState, screenRef }) {
   const clock = useClock();
   const screen = payload?.screen ?? {};
@@ -1268,7 +1570,6 @@ function RightScreen({ payload, errorMessage, fullscreenState, screenRef }) {
   const schedule = content.schedule ?? {};
   const riskItems = schedule?.riskSummary?.items ?? [];
   const scheduleRows = schedule.lineSchedules ?? [];
-  const scheduleDisplay = schedule.display ?? {};
   const moduleSettings = screen.moduleSettings ?? {};
   const pages = useMemo(() => resolveConfiguredPages("right", screen.pageKeys), [screen.pageKeys]);
   const [activePageIndex, setActivePageIndex] = usePageRotation(pages, screen.rotationIntervalSeconds);
@@ -1277,6 +1578,8 @@ function RightScreen({ payload, errorMessage, fullscreenState, screenRef }) {
     () => resolveVisibleSections(activeSections, moduleSettings),
     [activeSections, moduleSettings],
   );
+
+  const activePageKey = pages[activePageIndex]?.key ?? "";
 
   const simulationScrollRef = useRef(null);
   const simulationScrollActive = visibleSectionsActive.includes("simulationPlaceholder");
@@ -1314,38 +1617,33 @@ function RightScreen({ payload, errorMessage, fullscreenState, screenRef }) {
     ),
     schedule: (
       <section className="screen-panel panel-span-8 schedule-panel" key="schedule">
-        <div className="panel-header">
-          <h2>未完工订单排产展示</h2>
-          <span>未来窗口 {scheduleDisplay.windowDaysLabel || `${formatNumber(schedule.windowDays)} 天`}</span>
+        <div className="panel-header panel-header--schedule-only">
+          <h2>{meta.areaName ? `${meta.areaName}工单甘特图` : "工单甘特图"}</h2>
+          <span className="gantt-window-badge">
+            {schedule?.display?.windowDaysLabel || `时间跨度${Math.max(Number(schedule?.windowDays) || 30, 1)}天`}
+          </span>
         </div>
-        {riskItems.length > 0 ? (
-          <div className="risk-summary-row">
-            {riskItems.map((item) => (
-              <article className={`risk-summary-tile accent-${item.accent}`} key={item.key}>
-                <span>{item.label}</span>
-                <strong>{item.countLabel || formatNumber(item.count)}</strong>
-              </article>
-            ))}
-          </div>
-        ) : null}
         <GanttBoard lineSchedules={scheduleRows} schedule={schedule} />
       </section>
     ),
-    simulationPlaceholder: (
-      <section className="screen-panel panel-span-4 placeholder-panel simulation-panel" key="simulationPlaceholder">
-        <div className="panel-header">
-          <h2>3D 仿真占位区</h2>
-          <span>
-            一期后段
-            {simulationOverflowing ? " · 自动滚动中" : ""}
-          </span>
-        </div>
-        <div className="placeholder-copy placeholder-copy-wide simulation-placeholder-body" ref={simulationScrollRef}>
-          <strong>{content.simulationPlaceholder?.title || "3D 仿真待一期后段接入"}</strong>
-          <p>{content.simulationPlaceholder?.description || "当前阶段只保留预留区，不阻塞一期前段大屏。"}</p>
-        </div>
-      </section>
-    ),
+    simulationPlaceholder:
+      activePageKey === "schedule" ? (
+        <ScheduleOverviewSide areaName={meta.areaName} riskItems={riskItems} lineSchedules={scheduleRows} />
+      ) : (
+        <section className="screen-panel panel-span-4 placeholder-panel simulation-panel" key="simulationPlaceholder">
+          <div className="panel-header">
+            <h2>3D 仿真占位区</h2>
+            <span>
+              一期后段
+              {simulationOverflowing ? " · 自动滚动中" : ""}
+            </span>
+          </div>
+          <div className="placeholder-copy placeholder-copy-wide simulation-placeholder-body" ref={simulationScrollRef}>
+            <strong>{content.simulationPlaceholder?.title || "3D 仿真待一期后段接入"}</strong>
+            <p>{content.simulationPlaceholder?.description || "当前阶段只保留预留区，不阻塞一期前段大屏。"}</p>
+          </div>
+        </section>
+      ),
     energyData: <EnergyDashboardBoard key="energyData" bootstrap={content.energyData ?? {}} />,
   };
 
