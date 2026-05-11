@@ -243,6 +243,24 @@ def load_energy_dashboard_snapshot_row(
     return EnergyDashboardSnapshot.objects.filter(cache_key=ck).first()
 
 
+def _primary_refresh_interval_seconds(data_source_ids: list[int]) -> int:
+    """
+    与 sync_energy_dashboard_snapshots、大屏 bootstrap 一致：
+    取启用数据源中 pk 最小的一条的 refresh_interval_seconds（秒）；
+    缺记录时用 DataSourceConfig 字段默认值（见模型定义），下限 60。
+    """
+    fallback = DataSourceConfig.default_refresh_interval_seconds()
+    ids = _normalized_source_ids(data_source_ids)
+    if not ids:
+        return max(60, fallback)
+    ds = DataSourceConfig.objects.filter(pk__in=ids, is_enabled=True).order_by("pk").first()
+    if not ds:
+        return max(60, fallback)
+    raw = getattr(ds, "refresh_interval_seconds", None)
+    sec = int(raw) if raw is not None else fallback
+    return max(60, sec)
+
+
 def serve_energy_dashboard(
     data_source_ids: list[int],
     body: dict[str, Any],
@@ -252,6 +270,9 @@ def serve_energy_dashboard(
     """
     优先返回本地 EnergyDashboardSnapshot；轻量请求仍读库中完整快照并裁剪。
     body.forceRefresh / force_refresh 为真时直连外部能耗库并写回快照。
+
+    当本地快照存在但已超过 DataSourceConfig.refresh_interval_seconds 时（且允许直连兜底），
+    自动执行一次完整外部查询并写回快照，使大屏轮询间隔与后台「刷新间隔」语义一致。
     """
     filters = _parse_filters(body)
     refresh = (body.get("refreshScope") or body.get("refresh_scope") or "full").lower()
@@ -267,6 +288,31 @@ def serve_energy_dashboard(
 
     row = load_energy_dashboard_snapshot_row(data_source_ids, filters)
     if row and row.snapshot_data:
+        interval_sec = _primary_refresh_interval_seconds(data_source_ids)
+        age_sec = (timezone.now() - row.updated_at).total_seconds()
+        if allow_live_fallback and age_sec >= interval_sec:
+            full_body = {**body, "refreshScope": "full", "refresh_scope": "full"}
+            refreshed = run_energy_dashboard(
+                data_source_ids,
+                full_body,
+                persist_snapshot=True,
+            )
+            if refreshed.get("ok"):
+                data = dict(refreshed)
+                out_gen = data.get("generatedAt") or timezone.localtime().isoformat()
+                data["generatedAt"] = out_gen
+                return {
+                    **data,
+                    "ok": True,
+                    "fromCache": False,
+                    "refreshedFromExternal": True,
+                    "snapshotUpdatedAt": out_gen,
+                }
+            logger.warning(
+                "energy dashboard stale snapshot refresh failed: %s",
+                refreshed.get("error"),
+            )
+
         data = dict(row.snapshot_data)
         if lightweight:
             data = slice_energy_dashboard_for_live(data)

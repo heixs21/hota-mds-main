@@ -46,7 +46,10 @@ class Command(BaseCommand):
                 catalog_done.add(ds_tuple)
 
             primary = min(sources, key=lambda s: s.pk)
-            interval_sec = max(60, int(primary.refresh_interval_seconds or 300))
+            interval_sec = max(
+                60,
+                int(primary.refresh_interval_seconds or DataSourceConfig.default_refresh_interval_seconds()),
+            )
 
             body = default_energy_sync_body()
             eq_ids = sorted(str(x).strip() for x in (b.energy_equipment_ids or []) if str(x).strip())

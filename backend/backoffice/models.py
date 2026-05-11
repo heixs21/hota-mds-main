@@ -917,6 +917,14 @@ class DataSourceConfig(ReservedFieldsMixin, TimestampedModel):
         db_table_comment = "外部数据源连接与密钥配置"
         ordering = ["code"]
 
+    @classmethod
+    def default_refresh_interval_seconds(cls) -> int:
+        """与字段 refresh_interval_seconds 的模型默认值一致，业务代码勿再写死秒数。"""
+        field = cls._meta.get_field("refresh_interval_seconds")
+        raw = field.default
+        v = raw() if callable(raw) else raw
+        return max(1, int(v))
+
     def __str__(self):
         return f"{self.code} {self.name}"
 

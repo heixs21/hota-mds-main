@@ -1701,7 +1701,10 @@ def _build_energy_data_page(data_source_ids: list[int], energy_equipment_ids: li
         return _empty_energy_data_page("配置的能耗数据源未找到或已禁用")
 
     source = sources[0]
-    refresh_sec = max(60, int(getattr(source, "refresh_interval_seconds", None) or 300))
+    refresh_sec = max(
+        60,
+        int(getattr(source, "refresh_interval_seconds", None) or DataSourceConfig.default_refresh_interval_seconds()),
+    )
     eq_ids = [str(x).strip() for x in (energy_equipment_ids or []) if str(x).strip()]
     return {
         "pageTitle": "能耗数据采集与设备状态监测看板",

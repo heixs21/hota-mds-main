@@ -162,13 +162,13 @@ export function EnergyDashboardBoard({ bootstrap }) {
   const [err, setErr] = useState(bootErr || null);
   const [dash, setDash] = useState(null);
 
-  /** 与后台数据源「刷新间隔」一致（秒），用于轮询本地快照 API */
+  /** 与后台数据源「轮询间隔」一致（秒→毫秒），仅使用大屏载荷下发的值，不写死默认秒数 */
   const pollIntervalMs = useMemo(() => {
     const s = bootstrap?.refreshIntervalSeconds;
     if (typeof s === "number" && Number.isFinite(s) && s > 0) {
       return Math.max(5000, s * 1000);
     }
-    return 300 * 1000;
+    return null;
   }, [bootstrap?.refreshIntervalSeconds]);
 
   const equipmentKey = useMemo(() => JSON.stringify(equipmentIdsConfigured), [equipmentIdsConfigured]);
@@ -223,7 +223,7 @@ export function EnergyDashboardBoard({ bootstrap }) {
   }, [bodyBase, dataSourceIds.length]);
 
   useEffect(() => {
-    if (!dataSourceIds.length || !carouselPageActive) return;
+    if (!dataSourceIds.length || !carouselPageActive || pollIntervalMs == null) return;
     const t = setInterval(() => fetchLive(), pollIntervalMs);
     return () => clearInterval(t);
   }, [dataSourceIds.length, fetchLive, carouselPageActive, pollIntervalMs]);
