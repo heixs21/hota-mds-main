@@ -21,6 +21,7 @@ from .models import (
     DeviceStatusSnapshot,
     DisplayContentConfig,
     EnergySnapshot,
+    OpcUaHistorySample,
     ProductionLine,
     ProductionSnapshot,
     RuntimeParameterConfig,
@@ -29,6 +30,7 @@ from .models import (
     ScreenPageBinding,
 )
 from .connection_test_services import read_opcua_nodes, test_database_connection, test_opcua_connection
+from .opcua_history_services import OpcUaHistoryWriteContext
 from .serializers import (
     DataSourceHealthSnapshotSerializer,
     DeviceStatusSnapshotSerializer,
@@ -1368,7 +1370,15 @@ def _build_opcua_realtime_card_payload(source: DataSourceConfig, area) -> dict:
     if not node_config:
         return _empty_detail_payload("未配置 OPC UA 节点列表", offline=True)
 
-    read_result = read_opcua_nodes(source.connection_config or {}, node=node_config)
+    first_dev = card_devices[0] if card_devices else None
+    history = OpcUaHistoryWriteContext(
+        data_source_id=source.pk,
+        trigger=OpcUaHistorySample.TRIGGER_DISPLAY_REALTIME,
+        device_id=first_dev.pk if first_dev else None,
+        area_id=area.pk if area else None,
+        caller_detail="_build_opcua_realtime_card_payload",
+    )
+    read_result = read_opcua_nodes(source.connection_config or {}, node=node_config, history=history)
     vm = _build_opcua_value_map(read_result.items)
     data_offline = bool(read_result.offline or len(read_result.items) == 0)
     offline_reason = ""
@@ -1457,7 +1467,14 @@ def _build_robot_realtime_panel(source: DataSourceConfig | None, area) -> dict:
             "updatedAt": base_ts,
         }
 
-    read_result = read_opcua_nodes(source.connection_config or {}, node=node_config)
+    history = OpcUaHistoryWriteContext(
+        data_source_id=source.pk,
+        trigger=OpcUaHistorySample.TRIGGER_DISPLAY_REALTIME,
+        device_id=rdev.pk if rdev else None,
+        area_id=area.pk if area else None,
+        caller_detail="_build_robot_realtime_panel",
+    )
+    read_result = read_opcua_nodes(source.connection_config or {}, node=node_config, history=history)
     items = []
     for index, node_item in enumerate(read_result.items, start=1):
         resolved_comment = _resolve_node_comment({"comment": node_item.comment, "nodeId": node_item.node_id}, index)
@@ -1823,6 +1840,10 @@ def _build_device_realtime_monitor(area, data_source_ids: list[int] | None = Non
 
 
 def _refresh_device_runtime_statuses_if_needed() -> None:
+    from django.conf import settings
+
+    if getattr(settings, "DISABLE_DEVICE_RUNTIME_STATUS_REFRESH", False):
+        return
     now = timezone.now()
     snapshot = DeviceStatusSnapshot.objects.filter(snapshot_key=SNAPSHOT_KEY_DEFAULT).first()
     if snapshot and snapshot.source_updated_at and (
@@ -1938,7 +1959,15 @@ def _test_data_source_connectivity(source: DataSourceConfig) -> bool:
     source_type = (source.source_type or "").strip()
     connection_config = source.connection_config or {}
     if source_type == "opcua":
-        return test_opcua_connection(connection_config, node=source.node).ok
+        bound = source.devices.filter(is_active=True).order_by("id").first()
+        history = OpcUaHistoryWriteContext(
+            data_source_id=source.pk,
+            trigger=OpcUaHistorySample.TRIGGER_DEVICE_STATUS_PROBE,
+            device_id=bound.pk if bound else None,
+            area_id=bound.area_id if bound and bound.area_id else None,
+            caller_detail="_test_data_source_connectivity",
+        )
+        return test_opcua_connection(connection_config, node=source.node, history=history).ok
     if source_type in {"database", "energy_db", "schedule_db", "wms"}:
         return test_database_connection(connection_config).ok
     # Other source types keep compatibility with existing "mock pass" policy.

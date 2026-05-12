@@ -12,6 +12,7 @@ import asyncio
 import concurrent.futures
 import logging
 import socket
+import time
 from dataclasses import dataclass
 from typing import Optional
 from urllib.parse import urlparse
@@ -369,63 +370,86 @@ def _normalize_opcua_nodes(node, connection_config: dict) -> list[dict]:
     return [{"nodeId": fallback_node, "comment": "未命名节点1"}] if fallback_node else []
 
 
-def read_opcua_nodes(connection_config: dict, node=None) -> OpcUaReadResult:
+def read_opcua_nodes(connection_config: dict, node=None, *, history=None) -> OpcUaReadResult:
+    """读取 OPC UA 节点；若传入 ``history``（OpcUaHistoryWriteContext），读结束后写入历史表。"""
+    t0 = time.perf_counter()
+
+    def finish(result: OpcUaReadResult) -> OpcUaReadResult:
+        if history is not None:
+            try:
+                from .opcua_history_services import persist_opcua_read
+
+                persist_opcua_read(result, history, int((time.perf_counter() - t0) * 1000))
+            except Exception:  # noqa: BLE001
+                logger.exception("opc ua history persist failed")
+        return result
+
     endpoint = (connection_config.get("endpointUrl") or "").strip()
     node_items = _normalize_opcua_nodes(node, connection_config)
     username = (connection_config.get("username") or "").strip()
     password = connection_config.get("password") or ""
 
     if not endpoint:
-        return OpcUaReadResult(
-            ok=False,
-            offline=True,
-            message="OPC UA 服务器地址不能为空",
-            endpoint=endpoint,
-            source_info="",
-            items=[],
+        return finish(
+            OpcUaReadResult(
+                ok=False,
+                offline=True,
+                message="OPC UA 服务器地址不能为空",
+                endpoint=endpoint,
+                source_info="",
+                items=[],
+            )
         )
     if not endpoint.startswith("opc.tcp://"):
-        return OpcUaReadResult(
-            ok=False,
-            offline=True,
-            message="OPC UA 服务器地址需以 opc.tcp:// 开头",
-            endpoint=endpoint,
-            source_info="",
-            items=[],
+        return finish(
+            OpcUaReadResult(
+                ok=False,
+                offline=True,
+                message="OPC UA 服务器地址需以 opc.tcp:// 开头",
+                endpoint=endpoint,
+                source_info="",
+                items=[],
+            )
         )
 
     host, port = _parse_opcua_endpoint(endpoint)
     if not host:
-        return OpcUaReadResult(
-            ok=False,
-            offline=True,
-            message=f"无法从 {endpoint} 解析主机名",
-            endpoint=endpoint,
-            source_info="",
-            items=[],
+        return finish(
+            OpcUaReadResult(
+                ok=False,
+                offline=True,
+                message=f"无法从 {endpoint} 解析主机名",
+                endpoint=endpoint,
+                source_info="",
+                items=[],
+            )
         )
 
     tcp_error = _tcp_probe(host, port)
     if tcp_error:
-        return OpcUaReadResult(
-            ok=False,
-            offline=True,
-            message=tcp_error,
-            endpoint=endpoint,
-            source_info="",
-            items=[],
+        return finish(
+            OpcUaReadResult(
+                ok=False,
+                offline=True,
+                message=tcp_error,
+                endpoint=endpoint,
+                source_info="",
+                items=[],
+            )
         )
 
     try:
         from asyncua.sync import Client  # type: ignore
     except ImportError:
-        return OpcUaReadResult(
-            ok=False,
-            offline=False,
-            message="未安装 asyncua，无法读取节点实时值",
-            endpoint=endpoint,
-            source_info=f"{host}:{port}",
-            items=[],
+        return finish(
+            OpcUaReadResult(
+                ok=False,
+                offline=False,
+                message="未安装 asyncua，无法读取节点实时值",
+                endpoint=endpoint,
+                source_info=f"{host}:{port}",
+                items=[],
+            )
         )
 
     client = Client(url=endpoint, timeout=OPCUA_TIMEOUT_SECONDS)
@@ -436,22 +460,26 @@ def read_opcua_nodes(connection_config: dict, node=None) -> OpcUaReadResult:
     try:
         client.connect()
     except (asyncio.TimeoutError, concurrent.futures.TimeoutError):
-        return OpcUaReadResult(
-            ok=False,
-            offline=True,
-            message=f"OPC UA 连接超时（{OPCUA_TIMEOUT_SECONDS}s）",
-            endpoint=endpoint,
-            source_info=f"{host}:{port}",
-            items=[],
+        return finish(
+            OpcUaReadResult(
+                ok=False,
+                offline=True,
+                message=f"OPC UA 连接超时（{OPCUA_TIMEOUT_SECONDS}s）",
+                endpoint=endpoint,
+                source_info=f"{host}:{port}",
+                items=[],
+            )
         )
     except Exception as exc:  # noqa: BLE001
-        return OpcUaReadResult(
-            ok=False,
-            offline=True,
-            message=f"OPC UA 连接失败: {_describe_exception(exc)}",
-            endpoint=endpoint,
-            source_info=f"{host}:{port}",
-            items=[],
+        return finish(
+            OpcUaReadResult(
+                ok=False,
+                offline=True,
+                message=f"OPC UA 连接失败: {_describe_exception(exc)}",
+                endpoint=endpoint,
+                source_info=f"{host}:{port}",
+                items=[],
+            )
         )
 
     items = []
@@ -495,19 +523,21 @@ def read_opcua_nodes(connection_config: dict, node=None) -> OpcUaReadResult:
             pass
 
     all_ok = len(items) > 0 and all(item.ok for item in items)
-    return OpcUaReadResult(
-        ok=all_ok,
-        offline=False,
-        message="读取完成" if items else "未配置可读取节点",
-        endpoint=endpoint,
-        source_info=source_info,
-        items=items,
+    return finish(
+        OpcUaReadResult(
+            ok=all_ok,
+            offline=False,
+            message="读取完成" if items else "未配置可读取节点",
+            endpoint=endpoint,
+            source_info=source_info,
+            items=items,
+        )
     )
 
 
-def test_opcua_connection(connection_config: dict, node=None) -> ConnectionTestResult:
+def test_opcua_connection(connection_config: dict, node=None, *, history=None) -> ConnectionTestResult:
     """Connect to OPC UA and verify configured nodes in order."""
-    result = read_opcua_nodes(connection_config, node=node)
+    result = read_opcua_nodes(connection_config, node=node, history=history)
     if not result.items:
         return ConnectionTestResult(result.ok, result.message)
 

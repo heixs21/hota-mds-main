@@ -950,47 +950,88 @@ class DataSourceConfig(ReservedFieldsMixin, TimestampedModel):
 
 
 class OpcUaHistorySample(models.Model):
-    """OPC UA 历史采样原始记录（按数据源 + 节点 + 时间索引）。"""
+    """OPC UA 每次读点落库（按数据源 + 可选设备 + 时间索引；明细在 payload）。"""
 
-    QUALITY_GOOD = "good"
-    QUALITY_UNCERTAIN = "uncertain"
-    QUALITY_BAD = "bad"
-    QUALITY_CHOICES = [
-        (QUALITY_GOOD, "Good"),
-        (QUALITY_UNCERTAIN, "Uncertain"),
-        (QUALITY_BAD, "Bad"),
-    ]
+    TRIGGER_DISPLAY_REALTIME = "display_realtime"
+    TRIGGER_DEVICE_STATUS_PROBE = "device_status_probe"
+    TRIGGER_ADMIN_TEST_CONNECTION = "admin_test_connection"
+    TRIGGER_SCRIPT = "script"
 
     data_source = models.ForeignKey(
         "DataSourceConfig",
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name="opcua_history_samples",
         verbose_name="数据源配置",
-        db_comment="数据源配置ID",
+        db_comment="OPC UA 数据源配置ID",
     )
-    node_id = models.CharField(max_length=255, verbose_name="OPC UA NodeId", db_comment="OPC UA NodeId")
-    value = models.TextField(blank=True, default="", verbose_name="采样值（文本）", db_comment="采样值文本")
-    quality = models.CharField(
-        max_length=16,
-        choices=QUALITY_CHOICES,
-        default=QUALITY_GOOD,
-        verbose_name="数据质量",
-        db_comment="数据质量；good/uncertain/bad",
+    device = models.ForeignKey(
+        "Device",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="opcua_history_samples",
+        verbose_name="关联设备",
+        db_comment="本次读取上下文设备；无法确定时为空",
     )
-    sampled_at = models.DateTimeField(verbose_name="采样时间（业务时间）", db_comment="采样时间（业务时间）")
-    created_at = models.DateTimeField(auto_now_add=True, verbose_name="入库时间", db_comment="入库时间")
+    area = models.ForeignKey(
+        "Area",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="opcua_history_samples",
+        verbose_name="区域（冗余）",
+        db_comment="从设备抄录的区域，便于按厂区筛选",
+    )
+    fetched_at = models.DateTimeField(verbose_name="数据获取时间", db_comment="OPC 读完成时间")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="记录入库时间", db_comment="行插入时间")
+    payload = models.JSONField(default=dict, verbose_name="读数明细 JSON", db_comment="含 opcuaRead 与 schemaVersion 等")
+    payload_version = models.SmallIntegerField(default=1, verbose_name="payload 结构版本", db_comment="与 payload.schemaVersion 对齐")
+    read_ok = models.BooleanField(verbose_name="读是否成功", db_comment="与 OpcUaReadResult.ok 一致")
+    offline = models.BooleanField(verbose_name="是否连接级离线", db_comment="与 OpcUaReadResult.offline 一致")
+    item_count = models.PositiveSmallIntegerField(
+        null=True,
+        blank=True,
+        verbose_name="节点条数",
+        db_comment="opcuaRead.items 长度",
+    )
+    failure_summary = models.CharField(
+        max_length=512,
+        blank=True,
+        default="",
+        verbose_name="失败摘要",
+        db_comment="短摘要；完整信息在 payload",
+    )
+    duration_ms = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        verbose_name="读耗时毫秒",
+        db_comment="read_opcua_nodes 耗时",
+    )
+    payload_bytes = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        verbose_name="payload 字节数",
+        db_comment="JSON UTF-8 序列化长度",
+    )
+    trigger = models.CharField(
+        max_length=64,
+        verbose_name="写入来源",
+        db_comment="display_realtime/device_status_probe/admin_test_connection/script 等",
+    )
 
     class Meta:
         verbose_name = "OPC UA 历史采样"
         verbose_name_plural = "OPC UA 历史采样"
-        db_table_comment = "OPC UA 历史采样明细"
-        ordering = ["-sampled_at", "-id"]
+        db_table_comment = "OPC UA 读点历史"
+        ordering = ["-fetched_at", "-id"]
         indexes = [
-            models.Index(fields=["data_source", "-sampled_at"], name="opcua_hist_ds_time_idx"),
+            models.Index(fields=["data_source", "-fetched_at"], name="opcua_hist_ds_time_idx"),
+            models.Index(fields=["data_source", "read_ok", "-fetched_at"], name="opcua_hist_ds_ok_time_idx"),
+            models.Index(fields=["device", "-fetched_at"], name="opcua_hist_dev_time_idx"),
         ]
 
     def __str__(self):
-        return f"{self.data_source_id}:{self.node_id}@{self.sampled_at:%Y-%m-%d %H:%M:%S}"
+        return f"{self.data_source_id}@{self.fetched_at:%Y-%m-%d %H:%M:%S}"
 
 
 class Material(ReservedFieldsMixin, TimestampedModel):

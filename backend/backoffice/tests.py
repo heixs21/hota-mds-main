@@ -3,7 +3,7 @@ from decimal import Decimal
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils.dateparse import parse_datetime
 from rest_framework.test import APIClient
 
@@ -18,11 +18,12 @@ from .display_services import (
     get_screen_payload,
     load_mock_display_data,
 )
-from .connection_test_services import ConnectionTestResult
+from .connection_test_services import ConnectionTestResult, OpcUaNodeReadItem, OpcUaReadResult
 from .models import (
     Area,
     DataSourceConfig,
     Device,
+    OpcUaHistorySample,
     ScreenConfig,
     DisplayContentConfig,
     Material,
@@ -171,9 +172,11 @@ class BackofficeApiTests(TestCase):
         )
         self.assertEqual(mapping_response.status_code, 201)
 
+        area = Area.objects.create(code="A-SCREEN-TEST-UNIQ", name="屏测区", is_active=True)
         screen_response = self.client.post(
             "/api/admin/screen-configs",
             {
+                "areaId": area.pk,
                 "screenKey": "left",
                 "title": "左屏展示",
                 "subtitle": "综合运行",
@@ -550,6 +553,7 @@ class BackofficeApiTests(TestCase):
                     "comment": "机床报警状态",
                 },
             ],
+            history=None,
         )
         self.assertIn("节点读取结果", response.data["data"]["message"])
 
@@ -1072,9 +1076,11 @@ class BackofficeApiTests(TestCase):
         self.assertEqual(dup.status_code, 400)
 
     def test_screen_page_binding_crud(self):
+        area = Area.objects.create(code="A-BIND-TEST-UNIQ", name="绑定测区", is_active=True)
         create = self.client.post(
             "/api/admin/screen-page-bindings",
             {
+                "areaId": area.pk,
                 "screenKey": "left",
                 "pageKey": "energy",
                 "bindingSourceType": "",
@@ -1093,11 +1099,63 @@ class BackofficeApiTests(TestCase):
             "/api/admin/screen-page-bindings",
             {
                 "screenKey": "left",
-                "pageKey": "schedule",
+                "pageKey": "__invalid_page_key__",
             },
             format="json",
         )
         self.assertEqual(bad.status_code, 400)
+
+
+from .opcua_history_services import OpcUaHistoryWriteContext, persist_opcua_read
+
+
+class OpcUaHistoryPersistTests(TestCase):
+    @override_settings(OPCUA_HISTORY_DISABLED=False)
+    def test_persist_opcua_read_creates_row(self):
+        area = Area.objects.create(code="A-OPC-HIST", name="OPC历史区", is_active=True)
+        line = ProductionLine.objects.create(code="L-OPC-H", name="线", area=area, is_active=True)
+        dev = Device.objects.create(
+            code="D-OPC-H",
+            name="机",
+            ip="10.0.0.1",
+            area=area,
+            production_line=line,
+            is_active=True,
+        )
+        ds = DataSourceConfig.objects.create(
+            code="DS-OPC-H",
+            name="OPC源",
+            source_type="opcua",
+            connection_config={"endpointUrl": "opc.tcp://127.0.0.1:4840"},
+            node=[],
+            is_enabled=True,
+        )
+        dev.data_sources.add(ds)
+        result = OpcUaReadResult(
+            ok=True,
+            offline=False,
+            message="读取完成",
+            endpoint="opc.tcp://127.0.0.1:4840",
+            source_info="test",
+            items=[OpcUaNodeReadItem(comment="c", node_id="ns=2;s=x", ok=True, value="1", error="")],
+        )
+        persist_opcua_read(
+            result,
+            OpcUaHistoryWriteContext(
+                data_source_id=ds.pk,
+                trigger=OpcUaHistorySample.TRIGGER_DISPLAY_REALTIME,
+                device_id=dev.pk,
+                area_id=area.pk,
+                caller_detail="unit_test",
+            ),
+            12,
+        )
+        row = OpcUaHistorySample.objects.get(data_source=ds)
+        self.assertTrue(row.read_ok)
+        self.assertFalse(row.offline)
+        self.assertEqual(row.item_count, 1)
+        self.assertEqual(row.trigger, OpcUaHistorySample.TRIGGER_DISPLAY_REALTIME)
+        self.assertIn("opcuaRead", row.payload)
 
 
 class AreaLineDeviceCascadeTests(TestCase):
