@@ -33,7 +33,7 @@ from .models import (
     ScreenConfig,
     ScreenPageBinding,
 )
-from .opcua_history_services import ensure_opcua_history_samples
+from .opcua_history_services import OpcUaHistoryWriteContext
 from .connection_test_services import test_database_connection, test_opcua_connection
 from .serializers import (
     AreaSerializer,
@@ -502,7 +502,6 @@ class DataSourceConfigViewSet(AdminApiViewSet):
                 {"items": [], "total": 0, "page": 1, "pageSize": 0},
             )
 
-        ensure_opcua_history_samples(instance)
         queryset = OpcUaHistorySample.objects.filter(data_source=instance)
         total = queryset.count()
         page = self._parse_positive_int(request.query_params.get("page"), default=1)
@@ -531,7 +530,25 @@ class DataSourceConfigViewSet(AdminApiViewSet):
             return error_response("INVALID_PARAMS", "sourceType is required", 400)
 
         if source_type == "opcua":
-            result = test_opcua_connection(connection_config, node=node)
+            history = None
+            raw_ds = payload.get("dataSourceId") if isinstance(payload, dict) else None
+            if raw_ds is not None and str(raw_ds).strip() != "":
+                try:
+                    ds_pk = int(raw_ds)
+                except (TypeError, ValueError):
+                    ds_pk = None
+                if ds_pk and ds_pk > 0:
+                    ds = DataSourceConfig.objects.filter(pk=ds_pk, source_type="opcua").first()
+                    if ds:
+                        bd = ds.devices.filter(is_active=True).order_by("id").first()
+                        history = OpcUaHistoryWriteContext(
+                            data_source_id=ds.pk,
+                            trigger=OpcUaHistorySample.TRIGGER_ADMIN_TEST_CONNECTION,
+                            device_id=bd.pk if bd else None,
+                            area_id=bd.area_id if bd and bd.area_id else None,
+                            caller_detail="DataSourceConfigViewSet.test_connection",
+                        )
+            result = test_opcua_connection(connection_config, node=node, history=history)
             if not result.ok:
                 return error_response("CONNECTION_FAILED", result.message, 400)
             return success_response(

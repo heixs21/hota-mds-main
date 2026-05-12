@@ -596,18 +596,33 @@ class OperationLogSerializer(CamelCaseModelSerializer):
 
 
 class OpcUaHistorySampleSerializer(CamelCaseModelSerializer):
-    quality_label = serializers.CharField(source="get_quality_display", read_only=True)
+    device_code = serializers.CharField(source="device.code", read_only=True, allow_null=True)
+    device_name = serializers.CharField(source="device.name", read_only=True, allow_null=True)
+    area_code = serializers.CharField(source="area.code", read_only=True, allow_null=True)
+    area_name = serializers.CharField(source="area.name", read_only=True, allow_null=True)
 
     class Meta:
         model = OpcUaHistorySample
         fields = [
             "id",
-            "node_id",
-            "value",
-            "quality",
-            "quality_label",
-            "sampled_at",
+            "data_source",
+            "device",
+            "device_code",
+            "device_name",
+            "area",
+            "area_code",
+            "area_name",
+            "fetched_at",
             "created_at",
+            "payload",
+            "payload_version",
+            "read_ok",
+            "offline",
+            "item_count",
+            "failure_summary",
+            "duration_ms",
+            "payload_bytes",
+            "trigger",
         ]
 
 

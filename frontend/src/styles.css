@@ -1636,6 +1636,77 @@ html[data-theme="dark"] {
   width: max-content;
 }
 
+.modal-dialog.modal-dialog--opcua-history {
+  box-sizing: border-box;
+  max-width: min(calc(100vw - 48px), 1400px);
+  min-width: 0;
+  width: 100%;
+}
+
+.modal-body--table .table-wrap.table-wrap--opcua-history {
+  overflow-x: auto;
+  overflow-y: auto;
+}
+
+.modal-dialog--opcua-history .opcua-history-table {
+  table-layout: auto;
+  width: 100%;
+}
+
+.modal-dialog--opcua-history .opcua-history-table th,
+.modal-dialog--opcua-history .opcua-history-table td {
+  max-width: none;
+  overflow: visible;
+  text-overflow: clip;
+  vertical-align: top;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.modal-dialog--opcua-history .opcua-history-table .opcua-history-col-action {
+  overflow: visible;
+  text-align: center;
+  vertical-align: middle;
+  white-space: nowrap;
+  width: 1%;
+}
+
+.modal-dialog--opcua-history .opcua-history-detail-button {
+  font-size: 0.8rem;
+  padding: 6px 10px;
+}
+
+.modal-backdrop.modal-backdrop--nested {
+  z-index: 10000;
+}
+
+.modal-dialog.modal-dialog--opcua-payload {
+  box-sizing: border-box;
+  max-height: calc(100vh - 48px);
+  max-width: min(calc(100vw - 48px), 960px);
+  min-width: 0;
+  width: 100%;
+}
+
+.modal-body--opcua-payload {
+  min-height: 0;
+}
+
+.opcua-payload-pre {
+  background: var(--adm-bg-section);
+  border-radius: 8px;
+  color: var(--adm-text-2);
+  font-family: ui-monospace, "Cascadia Code", "Consolas", monospace;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  margin: 0;
+  max-height: min(70vh, 640px);
+  overflow: auto;
+  padding: 14px 16px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .modal-form {
   display: flex;
   flex: 1;

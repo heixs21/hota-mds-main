@@ -5,12 +5,27 @@ import { apiRequest } from "../../adminApi.js";
 /**
  * 「系统设置」侧：数据源历史、设备详情等弹窗。
  */
+function formatHistoryPayload(payload) {
+  if (payload == null || payload === "") {
+    return "(空)";
+  }
+  if (typeof payload === "string") {
+    return payload;
+  }
+  try {
+    return JSON.stringify(payload, null, 2);
+  } catch {
+    return String(payload);
+  }
+}
+
 export function HistoryDialog({ resourceDefinition, item, token, onClose, onUnauthorized, showToast }) {
   const [items, setItems] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [isLoading, setIsLoading] = useState(true);
+  const [payloadDetailRow, setPayloadDetailRow] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -41,6 +56,22 @@ export function HistoryDialog({ resourceDefinition, item, token, onClose, onUnau
     };
   }, [item.id, page, pageSize, resourceDefinition.endpoint, token, onUnauthorized, showToast]);
 
+  useEffect(() => {
+    function onKeyDown(event) {
+      if (event.key !== "Escape") {
+        return;
+      }
+      event.preventDefault();
+      if (payloadDetailRow) {
+        setPayloadDetailRow(null);
+      } else {
+        onClose();
+      }
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [onClose, payloadDetailRow]);
+
   function formatTime(value) {
     if (!value) return "-";
     const date = new Date(value);
@@ -57,9 +88,16 @@ export function HistoryDialog({ resourceDefinition, item, token, onClose, onUnau
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
+  function handlePayloadBackdropClick(event) {
+    if (event.target === event.currentTarget) {
+      setPayloadDetailRow(null);
+    }
+  }
+
   return (
-    <div className="modal-backdrop" onMouseDown={handleBackdropClick}>
-      <div className="modal-dialog modal-dialog--wide" role="dialog" aria-modal="true" aria-label="OPC UA 历史数据">
+    <>
+      <div className="modal-backdrop" onMouseDown={handleBackdropClick}>
+      <div className="modal-dialog modal-dialog--opcua-history" role="dialog" aria-modal="true" aria-label="OPC UA 历史数据">
         <div className="modal-header">
           <h3>OPC UA 历史数据 - {item.name || item.code}</h3>
           <button aria-label="关闭" className="modal-close" onClick={onClose} type="button">
@@ -73,23 +111,39 @@ export function HistoryDialog({ resourceDefinition, item, token, onClose, onUnau
           ) : items.length === 0 ? (
             <div className="modal-empty">该数据源暂无历史数据</div>
           ) : (
-            <div className="table-wrap">
-              <table className="data-table">
+            <div className="table-wrap table-wrap--opcua-history">
+              <table className="data-table opcua-history-table">
                 <thead>
                   <tr>
-                    <th>采样时间</th>
-                    <th>节点 ID</th>
-                    <th>采样值</th>
-                    <th>质量</th>
+                    <th>获取时间</th>
+                    <th>设备</th>
+                    <th>成功</th>
+                    <th>离线</th>
+                    <th>耗时(ms)</th>
+                    <th>来源</th>
+                    <th>摘要</th>
+                    <th className="opcua-history-col-action">查看详情</th>
                   </tr>
                 </thead>
                 <tbody>
                   {items.map((row) => (
                     <tr key={row.id}>
-                      <td>{formatTime(row.sampledAt)}</td>
-                      <td>{row.nodeId}</td>
-                      <td>{row.value}</td>
-                      <td>{row.qualityLabel || row.quality}</td>
+                      <td>{formatTime(row.fetchedAt)}</td>
+                      <td>{row.deviceName || row.deviceCode || "-"}</td>
+                      <td>{row.readOk ? "是" : "否"}</td>
+                      <td>{row.offline ? "是" : "否"}</td>
+                      <td>{row.durationMs != null ? row.durationMs : "-"}</td>
+                      <td>{row.trigger || "-"}</td>
+                      <td>{row.failureSummary || (row.readOk ? "正常" : "失败")}</td>
+                      <td className="opcua-history-col-action">
+                        <button
+                          className="ghost-button opcua-history-detail-button"
+                          onClick={() => setPayloadDetailRow(row)}
+                          type="button"
+                        >
+                          查看详情
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -133,6 +187,42 @@ export function HistoryDialog({ resourceDefinition, item, token, onClose, onUnau
         </div>
       </div>
     </div>
+
+      {payloadDetailRow ? (
+        <div
+          className="modal-backdrop modal-backdrop--nested"
+          onMouseDown={handlePayloadBackdropClick}
+          role="presentation"
+        >
+          <div
+            className="modal-dialog modal-dialog--opcua-payload"
+            role="dialog"
+            aria-modal="true"
+            aria-label="历史记录 payload"
+          >
+            <div className="modal-header">
+              <h3>读数明细（payload）</h3>
+              <button
+                aria-label="关闭"
+                className="modal-close"
+                onClick={() => setPayloadDetailRow(null)}
+                type="button"
+              >
+                ×
+              </button>
+            </div>
+            <div className="modal-body modal-body--opcua-payload">
+              <pre className="opcua-payload-pre">{formatHistoryPayload(payloadDetailRow.payload)}</pre>
+            </div>
+            <div className="modal-footer">
+              <button className="ghost-button" onClick={() => setPayloadDetailRow(null)} type="button">
+                关闭
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </>
   );
 }
 
