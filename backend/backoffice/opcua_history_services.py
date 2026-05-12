@@ -1,71 +1,91 @@
-"""Helpers for OPC UA history sample data.
-
-The collector pipeline that would normally populate
-``OpcUaHistorySample`` is out of scope for the current iteration, so this
-module lazily seeds a small batch of demo history samples whenever the
-admin UI requests history for an OPC UA data source that has none yet.
-
-This keeps the "历史数据" dialog functional in dev/demo environments
-without requiring a separate management command.
-"""
+"""OPC UA 读点历史落库（无 mock；由 read_opcua_nodes 在带上下文时写入）。"""
 from __future__ import annotations
 
-import math
-import random
-from datetime import timedelta
+import json
+import logging
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from django.utils import timezone
 
-from .models import DataSourceConfig, OpcUaHistorySample
+if TYPE_CHECKING:
+    from .connection_test_services import OpcUaReadResult
+
+logger = logging.getLogger(__name__)
+
+PAYLOAD_SCHEMA_VERSION = 1
 
 
-DEMO_SAMPLE_COUNT = 60
-DEMO_INTERVAL_SECONDS = 60
-DEFAULT_DEMO_NODE_ID = "ns=2;s=/Channel/State/chanStatus"
-DEMO_QUALITY_CYCLE = (
-    OpcUaHistorySample.QUALITY_GOOD,
-    OpcUaHistorySample.QUALITY_GOOD,
-    OpcUaHistorySample.QUALITY_GOOD,
-    OpcUaHistorySample.QUALITY_UNCERTAIN,
-    OpcUaHistorySample.QUALITY_GOOD,
-    OpcUaHistorySample.QUALITY_BAD,
-)
+@dataclass(frozen=True)
+class OpcUaHistoryWriteContext:
+    """写入 OpcUaHistorySample 时由调用方提供的上下文。"""
+
+    data_source_id: int
+    trigger: str
+    device_id: int | None = None
+    area_id: int | None = None
+    caller_detail: str = ""
 
 
-def ensure_opcua_history_samples(data_source: DataSourceConfig) -> None:
-    """Populate demo OPC UA history rows for ``data_source`` if absent."""
-    if data_source.source_type != "opcua":
+def persist_opcua_read(result: "OpcUaReadResult", history: OpcUaHistoryWriteContext, duration_ms: int) -> None:
+    """将一次 OPC 读结果写入历史表；失败仅打日志。"""
+    from django.conf import settings
+
+    if getattr(settings, "OPCUA_HISTORY_DISABLED", False):
         return
-    if OpcUaHistorySample.objects.filter(data_source=data_source).exists():
-        return
 
-    configured_nodes = data_source.node if isinstance(data_source.node, list) else []
-    first_configured_node = configured_nodes[0] if configured_nodes else ""
-    connection_config = data_source.connection_config or {}
-    node_id = (
-        first_configured_node
-        or connection_config.get("nodeId")
-        or DEFAULT_DEMO_NODE_ID
-    ).strip()
+    from .models import OpcUaHistorySample
 
-    rng = random.Random(f"opcua-history-{data_source.pk}")
-    now = timezone.now().replace(microsecond=0)
+    items_json = [
+        {
+            "comment": it.comment,
+            "nodeId": it.node_id,
+            "ok": it.ok,
+            "value": it.value,
+            "error": it.error,
+        }
+        for it in result.items
+    ]
+    payload = {
+        "schemaVersion": PAYLOAD_SCHEMA_VERSION,
+        "callerDetail": history.caller_detail or "",
+        "opcuaRead": {
+            "ok": result.ok,
+            "offline": result.offline,
+            "message": result.message,
+            "endpoint": result.endpoint,
+            "sourceInfo": result.source_info,
+            "items": items_json,
+        },
+    }
+    raw = json.dumps(payload, ensure_ascii=False)
+    payload_bytes = len(raw.encode("utf-8"))
+    item_count = len(result.items)
+    failure_summary = ""
+    if result.offline:
+        failure_summary = (result.message or "offline")[:512]
+    elif not result.ok and result.items:
+        for it in result.items:
+            if not it.ok and it.error:
+                failure_summary = it.error[:512]
+                break
+        if not failure_summary:
+            failure_summary = (result.message or "read failed")[:512]
+    elif not result.ok:
+        failure_summary = (result.message or "read failed")[:512]
 
-    rows = []
-    for offset in range(DEMO_SAMPLE_COUNT):
-        sampled_at = now - timedelta(seconds=DEMO_INTERVAL_SECONDS * offset)
-        base_value = 60 + 25 * math.sin(offset / 4.0)
-        jitter = rng.uniform(-3.0, 3.0)
-        value = round(base_value + jitter, 2)
-        quality = DEMO_QUALITY_CYCLE[offset % len(DEMO_QUALITY_CYCLE)]
-        rows.append(
-            OpcUaHistorySample(
-                data_source=data_source,
-                node_id=node_id,
-                value=str(value),
-                quality=quality,
-                sampled_at=sampled_at,
-            )
-        )
-
-    OpcUaHistorySample.objects.bulk_create(rows)
+    OpcUaHistorySample.objects.create(
+        data_source_id=history.data_source_id,
+        device_id=history.device_id,
+        area_id=history.area_id,
+        fetched_at=timezone.now(),
+        payload=payload,
+        payload_version=PAYLOAD_SCHEMA_VERSION,
+        read_ok=bool(result.ok),
+        offline=bool(result.offline),
+        item_count=item_count or None,
+        failure_summary=failure_summary,
+        duration_ms=max(0, int(duration_ms)) if duration_ms is not None else None,
+        payload_bytes=payload_bytes,
+        trigger=history.trigger[:64],
+    )
