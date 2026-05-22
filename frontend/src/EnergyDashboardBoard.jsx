@@ -158,7 +158,6 @@ export function EnergyDashboardBoard({ bootstrap }) {
   const bootErr = bootstrap?.errorMessage;
   const equipmentIdsConfigured = bootstrap?.energyEquipmentIds ?? [];
 
-  const [loading, setLoading] = useState(false);
   const [err, setErr] = useState(bootErr || null);
   const [dash, setDash] = useState(null);
 
@@ -185,15 +184,12 @@ export function EnergyDashboardBoard({ bootstrap }) {
 
   const fetchFull = useCallback(async () => {
     if (!dataSourceIds.length) return;
-    setLoading(true);
     setErr(null);
     try {
       const payload = await postEnergyDashboard({ ...bodyBase, refreshScope: "full" });
       setDash(payload);
     } catch (e) {
       setErr(e.message || String(e));
-    } finally {
-      setLoading(false);
     }
   }, [bodyBase, dataSourceIds.length]);
 
@@ -255,10 +251,6 @@ export function EnergyDashboardBoard({ bootstrap }) {
       <header className="edb-hero">
         <div className="edb-hero-title">
           <h2>{bootstrap?.pageTitle || "能耗数据采集与设备状态监测看板"}</h2>
-          {bootstrap?.sourceName ? <span className="edb-src">{bootstrap.sourceName}</span> : null}
-        </div>
-        <div className="edb-hero-meta">
-          {loading ? "加载中…" : dash?.generatedAt ? `更新 ${dash.generatedAt}` : ""}
         </div>
       </header>
 
@@ -321,9 +313,9 @@ export function EnergyDashboardBoard({ bootstrap }) {
 
       <div className="edb-main edb-main--no-tree">
         <main className="edb-center">
-          <div className="edb-table-wrap edb-table-wrap--fit">
-            <h3 className="edb-block-title">实时通讯与电量</h3>
-            <div className="edb-table-scroll edb-scroll edb-table-scroll--fit">
+          <div className="edb-unified-chart-panel edb-realtime-panel">
+            <h3 className="edb-unified-chart-main-title">实时通讯与电量</h3>
+            <div className="edb-realtime-body edb-scroll">
               <table className="edb-table">
                 <thead>
                   <tr>
@@ -359,7 +351,7 @@ export function EnergyDashboardBoard({ bootstrap }) {
             </div>
           </div>
 
-          <div className="edb-unified-chart-panel">
+          <div className="edb-unified-chart-panel edb-analysis-panel">
             <h3 className="edb-unified-chart-main-title">电量分析</h3>
             <div className="edb-unified-triple">
               <div className="edb-unified-chart-col">
@@ -386,7 +378,7 @@ export function EnergyDashboardBoard({ bootstrap }) {
 
         <aside className="edb-aside edb-aside-right edb-scroll">
           <div className="edb-card">
-            <h4>能耗分类占比</h4>
+            <h4>能耗分类占比（近一周）</h4>
             <DonutChart slices={pie} />
           </div>
           <div className="edb-card">
