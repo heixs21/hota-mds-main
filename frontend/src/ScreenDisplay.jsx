@@ -1,6 +1,9 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 
 import { EnergyDashboardBoard } from "./EnergyDashboardBoard.jsx";
+import { RealtimeDeviceCard } from "./screen/realtime/RealtimeCards.jsx";
+import { TaotongGunziLineRealtimeBoard } from "./screen/realtime/TaotongGunziLineBoard.jsx";
+import { XiaozhouLineRealtimeBoard } from "./screen/realtime/XiaozhouLineBoard.jsx";
 import { ScreenCarouselPageContext } from "./screenCarouselContext.jsx";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -150,238 +153,6 @@ function formatScreenDateOnly(value) {
   const m = String(t.getMonth() + 1).padStart(2, "0");
   const d = String(t.getDate()).padStart(2, "0");
   return `${y}-${m}-${d}`;
-}
-
-function formatRpm(value) {
-  if (value === null || value === undefined || value === "") {
-    return "--";
-  }
-  const n = Number(value);
-  if (Number.isNaN(n)) {
-    return "--";
-  }
-  return Math.round(n).toLocaleString("zh-CN");
-}
-
-function SpindleLoadRing({ pct, danger }) {
-  const n = pct == null || Number.isNaN(Number(pct)) ? null : Math.min(100, Math.max(0, Number(pct)));
-  const r = 38;
-  const c = 2 * Math.PI * r;
-  const offset = n == null ? c : c * (1 - n / 100);
-  const label = n == null ? "--" : `${Math.round(n)}%`;
-
-  return (
-    <div className="cnc-load-ring-wrap">
-      <svg className="cnc-load-ring-svg" viewBox="0 0 100 100" aria-hidden="true">
-        <circle className="cnc-load-ring-track" cx="50" cy="50" r={r} fill="none" strokeWidth="10" />
-        <circle
-          className={danger ? "cnc-load-ring-fill cnc-load-ring-fill--danger" : "cnc-load-ring-fill"}
-          cx="50"
-          cy="50"
-          r={r}
-          fill="none"
-          strokeWidth="10"
-          strokeDasharray={c}
-          strokeDashoffset={offset}
-          transform="rotate(-90 50 50)"
-        />
-      </svg>
-      <span className={`cnc-load-ring-label ${danger ? "cnc-load-ring-label--danger" : ""}`}>{label}</span>
-    </div>
-  );
-}
-
-/** 将 OPC 布尔/数值解析为是否「点亮」该状态灯 */
-function opcRobotRowActive(row) {
-  if (!row || !row.ok) {
-    return false;
-  }
-  const v = row.value;
-  if (v === true) {
-    return true;
-  }
-  if (v === false || v === null || v === undefined) {
-    return false;
-  }
-  const s = String(v).trim().toLowerCase();
-  if (s === "true" || s === "1" || s === "yes" || s === "是" || s === "on") {
-    return true;
-  }
-  if (s === "false" || s === "0" || s === "no" || s === "否" || s === "off" || s === "") {
-    return false;
-  }
-  const n = Number(s);
-  if (!Number.isNaN(n)) {
-    return n !== 0;
-  }
-  return Boolean(v);
-}
-
-/**
- * 根据节点注释识别运行/停止/故障（互斥归类，用于合成指示灯）。
- * 优先匹配故障、停止，避免「非运行」误命中「运行」。
- */
-function robotStatusKindFromComment(comment) {
-  const raw = (comment || "").trim();
-  if (!raw) {
-    return null;
-  }
-  if (/故障|fault|alarm/i.test(raw)) {
-    return "fault";
-  }
-  if (/停止|stop|非运行/i.test(raw)) {
-    return "stop";
-  }
-  if (/运行|run/i.test(raw)) {
-    return "run";
-  }
-  return null;
-}
-
-function RobotRunStopFaultLights({ runRow, stopRow, faultRow }) {
-  const runOn = opcRobotRowActive(runRow);
-  const stopOn = opcRobotRowActive(stopRow);
-  const faultOn = opcRobotRowActive(faultRow);
-  return (
-    <div className="cnc-robot-status-bar" role="group" aria-label="机器人运行状态">
-      <div className="cnc-robot-status-lamps">
-        <div className="cnc-robot-lamp-slot">
-          <span
-            className={`cnc-robot-lamp cnc-robot-lamp--run ${runOn ? "is-on" : ""} ${
-              runRow && runRow.ok === false ? "is-err" : ""
-            }`}
-            title={runRow?.ok === false ? "运行 — 读取失败" : "运行"}
-            aria-hidden="true"
-          />
-          <span className="cnc-robot-lamp-cap">运行</span>
-        </div>
-        <div className="cnc-robot-lamp-slot">
-          <span
-            className={`cnc-robot-lamp cnc-robot-lamp--stop ${stopOn ? "is-on" : ""} ${
-              stopRow && stopRow.ok === false ? "is-err" : ""
-            }`}
-            title={stopRow?.ok === false ? "停止 — 读取失败" : "停止"}
-            aria-hidden="true"
-          />
-          <span className="cnc-robot-lamp-cap">停止</span>
-        </div>
-        <div className="cnc-robot-lamp-slot">
-          <span
-            className={`cnc-robot-lamp cnc-robot-lamp--fault ${faultOn ? "is-on" : ""} ${
-              faultRow && faultRow.ok === false ? "is-err" : ""
-            }`}
-            title={faultRow?.ok === false ? "故障 — 读取失败" : "故障"}
-            aria-hidden="true"
-          />
-          <span className="cnc-robot-lamp-cap">故障</span>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function RealtimeRobotColumn({ robot, deviceOffline }) {
-  if (!robot) {
-    return null;
-  }
-  if (deviceOffline) {
-    return (
-      <div className="cnc-robot-col cnc-robot-col--offline">
-        <div className="cnc-robot-col-head">{robot.displayTitle || "机器人"}</div>
-        <p className="cnc-spindle-offline-msg">离线</p>
-      </div>
-    );
-  }
-  const rows = robot.items ?? [];
-  let runRow;
-  let stopRow;
-  let faultRow;
-  const plainRows = [];
-  for (const row of rows) {
-    const kind = robotStatusKindFromComment(row.comment);
-    if (kind === "run" && runRow === undefined) {
-      runRow = row;
-    } else if (kind === "stop" && stopRow === undefined) {
-      stopRow = row;
-    } else if (kind === "fault" && faultRow === undefined) {
-      faultRow = row;
-    } else {
-      plainRows.push(row);
-    }
-  }
-  const hasStatusLights = runRow !== undefined || stopRow !== undefined || faultRow !== undefined;
-
-  return (
-    <div className="cnc-robot-col">
-      <div className="cnc-robot-col-head">{robot.displayTitle || "机器人"}</div>
-      {rows.length > 0 ? (
-        <>
-          {hasStatusLights ? (
-            <RobotRunStopFaultLights faultRow={faultRow} runRow={runRow} stopRow={stopRow} />
-          ) : null}
-          {plainRows.length > 0 ? (
-            <div className="cnc-robot-plain-stack">
-              {plainRows.map((row, idx) => (
-                <div className="cnc-robot-plain-line" key={`${row.comment}-${idx}`}>
-                  <span className="cnc-robot-plain-k">{row.comment}</span>
-                  <span className={`cnc-robot-plain-v ${row.ok ? "" : "cnc-robot-plain-v--bad"}`}>
-                    {row.ok ? row.value : "获取失败"}
-                  </span>
-                </div>
-              ))}
-            </div>
-          ) : null}
-          {!hasStatusLights && plainRows.length === 0 ? <p className="cnc-robot-empty">暂无节点数据</p> : null}
-        </>
-      ) : (
-        <p className="cnc-robot-empty">暂无节点数据</p>
-      )}
-    </div>
-  );
-}
-
-function RealtimeSpindleColumn({ slot, deviceOffline }) {
-  if (deviceOffline) {
-    return (
-      <div className="cnc-spindle-col cnc-spindle-col--offline">
-        <div className="cnc-spindle-col-head">{slot.label}</div>
-        <p className="cnc-spindle-offline-msg">离线</p>
-      </div>
-    );
-  }
-
-  const ovr = slot.speedOverridePct;
-  const ovrWarn = ovr != null && ovr < 99.5;
-  const cmd = slot.cmdSpeedRpm;
-  const loadPct = slot.loadPct;
-  const loadDanger = loadPct != null && loadPct > 95;
-
-  return (
-    <div className={`cnc-spindle-col ${slot.configured ? "" : "cnc-spindle-col--empty"}`}>
-      <div className="cnc-spindle-col-head">{slot.label}</div>
-      {!slot.configured ? (
-        <p className="cnc-spindle-unconfigured">未配置</p>
-      ) : (
-        <>
-          <div className="cnc-spindle-rpm">
-            <span className="cnc-spindle-rpm-value">{formatRpm(slot.actSpeedRpm)}</span>
-            <span className="cnc-spindle-rpm-unit">rpm</span>
-          </div>
-          <div className={`cnc-spindle-ovr ${ovrWarn ? "cnc-spindle-ovr--warn" : ""}`}>倍率 {ovr != null ? `${Math.round(ovr)}%` : "--"}</div>
-          <div className="cnc-spindle-cmd">S 指令: {cmd != null ? `${formatRpm(cmd)} rpm` : "--"}</div>
-          <div className="cnc-spindle-load-row">
-            <span className="cnc-spindle-load-cap">负载</span>
-            <SpindleLoadRing pct={loadPct} danger={loadDanger} />
-          </div>
-          <div className="cnc-spindle-extra">
-            <span className={slot.temperatureC != null && slot.temperatureC > 85 ? "cnc-spindle-extra-warn" : ""}>
-              温度 {slot.temperatureC != null ? `${Number(slot.temperatureC).toFixed(1)} °C` : "-- °C"}
-            </span>
-          </div>
-        </>
-      )}
-    </div>
-  );
 }
 
 function clamp(value, min, max) {
@@ -1117,7 +888,6 @@ function LeftScreen({ payload, errorMessage, fullscreenState, screenRef }) {
       <DeviceRealtimeSection
         key="deviceRealtimeMonitor"
         drm={drm}
-        clock={clock}
         alarmPulseDismissed={alarmPulseDismissed}
         setAlarmPulseDismissed={setAlarmPulseDismissed}
       />
@@ -1192,93 +962,46 @@ function LeftScreen({ payload, errorMessage, fullscreenState, screenRef }) {
   );
 }
 
-function DeviceRealtimeSection({ drm, clock, alarmPulseDismissed, setAlarmPulseDismissed }) {
+function DeviceRealtimeSection({ drm, alarmPulseDismissed, setAlarmPulseDismissed }) {
+  if (drm.realtimeLayout === "xiaozhou_line") {
+    return (
+      <XiaozhouLineRealtimeBoard
+        drm={drm}
+        alarmPulseDismissed={alarmPulseDismissed}
+        setAlarmPulseDismissed={setAlarmPulseDismissed}
+        formatDateTime={formatDateTime}
+      />
+    );
+  }
+
+  if (drm.realtimeLayout === "taotong_gunzi_line") {
+    return (
+      <TaotongGunziLineRealtimeBoard
+        drm={drm}
+        alarmPulseDismissed={alarmPulseDismissed}
+        setAlarmPulseDismissed={setAlarmPulseDismissed}
+        formatDateTime={formatDateTime}
+      />
+    );
+  }
+
   return (
     <section className="screen-panel panel-span-12 panel-unbounded industrial-realtime-panel" key="deviceRealtimeMonitor">
-      <header className="industrial-realtime-header">
-        <div className="industrial-realtime-header-left">
-          <h2>设备实时监控</h2>
-          <span className="industrial-realtime-poll">{`轮询 ${drm.pollIntervalSeconds ?? 30}s`}</span>
-        </div>
-        <time className="industrial-realtime-clock" dateTime={clock.toISOString()}>
-          {formatDateTime(clock)}
-        </time>
-      </header>
       <div className="industrial-realtime-grid">
         {(drm.cards ?? []).map((card) => {
-          const borderKey = card.machineStatus?.borderColor ?? "gray";
           const pulseOn = Boolean(card.machineStatus?.alarmActive) && !alarmPulseDismissed.has(card.sourceCode);
-          const spindles = Array.isArray(card.spindles) ? card.spindles : [];
-          const job = card.job ?? {};
-          const mergeLayout = Boolean(card.mergeLayout && card.robot);
-          const cncOffline = mergeLayout ? card.cncSourceStatus !== "online" : card.status !== "online";
-          const robotOffline = mergeLayout ? card.robotSourceStatus !== "online" : true;
           return (
-            <article
-              className={`cnc-device-card cnc-device-card--border-${borderKey} ${pulseOn ? "cnc-device-card--pulse" : ""}`}
+            <RealtimeDeviceCard
               key={card.sourceCode}
-              onClick={() => {
+              card={card}
+              pulseOn={pulseOn}
+              formatDateTime={formatDateTime}
+              onDismissAlarm={() => {
                 if (card.machineStatus?.alarmActive) {
                   setAlarmPulseDismissed((prev) => new Set(prev).add(card.sourceCode));
                 }
               }}
-            >
-              {card.machineStatus?.alarmActive ? (
-                <span className="cnc-alarm-icon" title="报警" aria-hidden="true">!</span>
-              ) : null}
-              <div className="cnc-device-head">
-                <div className="cnc-device-head-text">
-                  <h3 className="cnc-device-title">{card.displayTitle || card.deviceName || card.sourceName}</h3>
-                  {card.subtitle ? <div className="cnc-device-subtitle">{card.subtitle}</div> : null}
-                  <div className="cnc-device-model">{`型号 ${card.deviceModel ?? "--"}`}</div>
-                </div>
-                <div className="cnc-device-status">
-                  <span className={`cnc-status-dot cnc-status-dot--${card.machineStatus?.indicator ?? "gray"}`} />
-                  <span className="cnc-status-label">{card.machineStatus?.label ?? "--"}</span>
-                </div>
-              </div>
-              {card.status !== "online" ? (
-                <div className="cnc-device-offline-strip">{card.offlineReason || "连接超时或无法建立连接"}</div>
-              ) : null}
-              {mergeLayout ? (
-                <div className="cnc-machine-split">
-                  <div className="cnc-machine-split-col">
-                    <RealtimeSpindleColumn deviceOffline={cncOffline} slot={spindles[0] ?? { label: "主轴", configured: false }} />
-                  </div>
-                  <div className="cnc-machine-split-vrule" aria-hidden="true" />
-                  <div className="cnc-machine-split-col">
-                    <RealtimeRobotColumn deviceOffline={robotOffline} robot={card.robot} />
-                  </div>
-                </div>
-              ) : (
-                <div className="cnc-spindle-row">
-                  <RealtimeSpindleColumn deviceOffline={card.status !== "online"} slot={spindles[0] ?? { label: "主轴", configured: false }} />
-                </div>
-              )}
-              <footer className="cnc-job-footer">
-                <div className="cnc-job-program-row">
-                  <span className="cnc-job-k">当前程序</span>
-                  <span className="cnc-job-main">{job.mainProgram ?? "--"}</span>
-                  <span className="cnc-job-sep">·</span>
-                  <span className="cnc-job-k">行号</span>
-                  <span className="cnc-job-line">{job.exeLine ?? "--"}</span>
-                </div>
-                <div className="cnc-job-times">
-                  <div className="cnc-job-time-pill" title="累计有效切削时间">
-                    <span>切削</span>
-                    <strong>{job.cycleTimeFormatted ?? "--"}</strong>
-                  </div>
-                  <div className="cnc-job-time-pill" title="程序运行时长">
-                    <span>程序</span>
-                    <strong>{job.operationTimeFormatted ?? "--"}</strong>
-                  </div>
-                  <span className={`cnc-mode-tag cnc-mode-tag--${String(job.workModeTag ?? "").toLowerCase()}`}>
-                    {job.workModeTag ?? "--"}
-                  </span>
-                </div>
-              </footer>
-              <div className="cnc-device-foot-meta">{`更新 ${formatDateTime(card.updatedAt)}`}</div>
-            </article>
+            />
           );
         })}
         {(drm.cards ?? []).length === 0 ? (
@@ -1610,7 +1333,6 @@ function RightScreen({ payload, errorMessage, fullscreenState, screenRef }) {
       <DeviceRealtimeSection
         key="deviceRealtimeMonitor"
         drm={drm}
-        clock={clock}
         alarmPulseDismissed={alarmPulseDismissed}
         setAlarmPulseDismissed={setAlarmPulseDismissed}
       />
@@ -1745,10 +1467,26 @@ function ScreenFallback({ areaCode, screenKey, errorMessage }) {
   );
 }
 
+const DEFAULT_SCREEN_POLL_SEC = 30;
+const REALTIME_POLL_FLOOR_SEC = 2;
+
+function resolveScreenPollSeconds(screenKey, payload) {
+  const pageKeys = payload?.screen?.pageKeys ?? [];
+  const hasRealtimePage = pageKeys.includes("realtime");
+  const drmPoll = Number(payload?.content?.deviceRealtimeMonitor?.pollIntervalSeconds);
+
+  if (hasRealtimePage || (Number.isFinite(drmPoll) && drmPoll > 0)) {
+    const sec = Number.isFinite(drmPoll) && drmPoll > 0 ? drmPoll : REALTIME_POLL_FLOOR_SEC;
+    return Math.max(sec, REALTIME_POLL_FLOOR_SEC);
+  }
+
+  return DEFAULT_SCREEN_POLL_SEC;
+}
+
 function ScreenDisplay({ areaCode, screenKey }) {
   const [payload, setPayload] = useState(null);
   const [errorMessage, setErrorMessage] = useState("");
-  const [pollIntervalMs, setPollIntervalMs] = useState(30000);
+  const [pollIntervalMs, setPollIntervalMs] = useState(DEFAULT_SCREEN_POLL_SEC * 1000);
   const screenRef = useRef(null);
   const fullscreenState = useFullscreen(screenRef);
 
@@ -1762,11 +1500,7 @@ function ScreenDisplay({ areaCode, screenKey }) {
           return;
         }
         setPayload(nextPayload);
-        const nextPollSeconds =
-          screenKey === "left"
-            ? Number(nextPayload?.content?.deviceRealtimeMonitor?.pollIntervalSeconds || 30)
-            : 30;
-        setPollIntervalMs(Math.max(nextPollSeconds, 5) * 1000);
+        setPollIntervalMs(resolveScreenPollSeconds(screenKey, nextPayload) * 1000);
         setErrorMessage("");
       } catch (error) {
         if (cancelled) {

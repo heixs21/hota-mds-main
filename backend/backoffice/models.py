@@ -854,6 +854,7 @@ class DataSourceConfig(ReservedFieldsMixin, TimestampedModel):
     SOURCE_CHOICES = [
         ("opcua", "OPCUA"),
         ("modbus_tcp", "Modbus TCP"),
+        ("s7", "S7 PLC"),
         ("sap_rfc", "SAP RFC"),
         ("database", "数据库"),
         ("repair", "报修系统"),
@@ -1226,7 +1227,36 @@ class ScreenPageBinding(ReservedFieldsMixin, TimestampedModel):
         help_text="platform_equipment.e_id，用于能耗页筛选",
         db_comment="能耗设备ID列表JSON",
     )
+    device_ids = models.JSONField(
+        default=list,
+        blank=True,
+        verbose_name="监控设备 ID 列表（JSON）",
+        help_text="仅 page_key=realtime 时可选；指定卡片标题/关联设备，空则按数据源绑定设备推断",
+        db_comment="设备实时监控页可选设备ID列表JSON",
+    )
     is_enabled = models.BooleanField(default=True, verbose_name="是否启用", db_comment="是否启用")
+    realtime_layout = models.CharField(
+        max_length=32,
+        blank=True,
+        default="",
+        choices=[
+            ("", "自动识别"),
+            ("siemens_boring", "西门子镗孔"),
+            ("syntec_cnc", "新代 CNC"),
+            ("parameter_grid", "参数列表"),
+            ("xiaozhou_line", "销轴产线布局"),
+            ("taotong_gunzi_line", "套筒滚子产线布局"),
+        ],
+        verbose_name="实时监控模板",
+        help_text="仅 page_key=realtime 时生效；空则按 OPC 节点自动识别",
+        db_comment="设备实时监控页仪表盘模板；空为自动识别",
+    )
+    realtime_demo_mode = models.BooleanField(
+        default=True,
+        verbose_name="展示模式",
+        help_text="仅 page_key=realtime 时生效；启用后不连接现场设备，全部显示在线演示数据",
+        db_comment="设备实时监控展示模式；启用后全部工位在线并展示演示数据",
+    )
     notes = models.TextField(blank=True, verbose_name="备注", db_comment="备注")
 
     class Meta:

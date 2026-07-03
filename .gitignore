@@ -40,3 +40,4 @@ logs/
 .obsidian/
 .clinerules
 auxiliarydocs/
+ecosystem.config.cjs

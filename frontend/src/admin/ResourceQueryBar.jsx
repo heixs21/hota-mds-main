@@ -1,4 +1,14 @@
-export function ResourceQueryBar({ queryFields, queryState, relatedOptions, onChange, onSearch, onReset, disabled, queryActionsPrefix }) {
+export function ResourceQueryBar({
+  queryFields,
+  queryState,
+  relatedOptions,
+  onChange,
+  onSearch,
+  onReset,
+  disabled,
+  queryActionsPrefix,
+  queryActionsSuffix,
+}) {
   if (!queryFields || !queryFields.length) {
     return null;
   }
@@ -73,6 +83,7 @@ export function ResourceQueryBar({ queryFields, queryState, relatedOptions, onCh
         <button className="ghost-button" disabled={disabled} onClick={onReset} type="button">
           重置
         </button>
+        {queryActionsSuffix}
       </div>
     </div>
   );

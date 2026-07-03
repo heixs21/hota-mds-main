@@ -41,6 +41,15 @@ const SCREEN_KEY_OPTIONS = [
   { value: "right", label: "右屏" },
 ];
 
+const REALTIME_LAYOUT_OPTIONS = [
+  { value: "", label: "自动识别" },
+  { value: "siemens_boring", label: "西门子镗孔" },
+  { value: "syntec_cnc", label: "新代 CNC" },
+  { value: "parameter_grid", label: "参数列表" },
+  { value: "xiaozhou_line", label: "销轴产线布局" },
+  { value: "taotong_gunzi_line", label: "套筒滚子产线布局" },
+];
+
 /** 与后端 RuntimeParameterConfig.gantt_anchor_mode 一致 */
 const GANTT_ANCHOR_MODE_OPTIONS = [
   { value: "earliest_order", label: "最早未完成工单" },
@@ -75,6 +84,7 @@ export const DATA_SOURCE_BINDING_CATEGORY_OPTIONS = [
   { value: "opcua", label: "OPC UA" },
   { value: "database", label: "数据库" },
   { value: "modbus_tcp", label: "Modbus TCP" },
+  { value: "s7", label: "S7 PLC" },
   { value: "sap_rfc", label: "SAP RFC" },
   { value: "repair", label: "报修系统" },
 ];
@@ -90,6 +100,7 @@ const ENTITY_TYPE_OPTIONS = [
 const DATA_SOURCE_TYPE_OPTIONS = [
   { value: "opcua", label: "OPC UA" },
   { value: "modbus_tcp", label: "Modbus TCP" },
+  { value: "s7", label: "S7 PLC" },
   { value: "sap_rfc", label: "SAP RFC" },
   { value: "database", label: "数据库" },
   { value: "repair", label: "报修系统" },
@@ -122,6 +133,7 @@ export const ADMIN_MENU_GROUPS = [
         children: [
           "dataSourceOpcua",
           "dataSourceModbusTcp",
+          "dataSourceS7",
           "dataSourceSapRfc",
           "dataSourceDatabase",
           "dataSourceRepair",
@@ -162,7 +174,7 @@ const DATA_SOURCE_BASE_COLUMNS = [
 ];
 
 const DATA_SOURCE_TYPE_FIELDS = {
-  opcua: [  // OPC UA stays separate — it has its own connection fields & polling logic
+  opcua: [  // OPC UA：长连接订阅 + 节点 subscribe 标记；无轮询间隔字段
     {
       key: "endpointUrl",
       label: "服务器地址 (Endpoint URL)",
@@ -177,7 +189,7 @@ const DATA_SOURCE_TYPE_FIELDS = {
       label: "节点ID列表",
       type: "json",
       placeholder:
-        "[\n  {\n    \"nodeId\": \"ns=2;s=/Channel/State/chanStatus\",\n    \"comment\": \"机床运行状态\"\n  },\n  {\n    \"nodeId\": \"ns=2;s=/DriveVsa/Drive/r0035\",\n    \"comment\": \"主轴电机温度\"\n  },\n  {\n    \"nodeId\": \"ns=2;s=/Nck/Spindle/driveLoad\",\n    \"comment\": \"主轴负载\"\n  }\n]",
+        "[\n  {\n    \"nodeId\": \"ns=2;s=/Channel/State/chanStatus\",\n    \"comment\": \"机床运行状态\"\n  },\n  {\n    \"nodeId\": \"ns=2;s=/Nck/Configuration/nckVersion\",\n    \"comment\": \"CNC型号\",\n    \"subscribe\": false\n  },\n  {\n    \"nodeId\": \"ns=2;s=/Nck/Spindle/driveLoad\",\n    \"comment\": \"主轴负载\"\n  }\n]",
       defaultValue: [],
       required: true,
     },
@@ -219,6 +231,42 @@ const DATA_SOURCE_TYPE_FIELDS = {
     { key: "password", label: "密码", type: "text", storage: "connectionConfig", defaultValue: "" },
   ],
   modbus_tcp: [],
+  s7: [
+    {
+      key: "host",
+      label: "PLC 主机",
+      type: "text",
+      storage: "connectionConfig",
+      placeholder: "192.168.31.2",
+      defaultValue: "",
+      required: true,
+    },
+    {
+      key: "rack",
+      label: "机架 (Rack)",
+      type: "integer",
+      storage: "connectionConfig",
+      defaultValue: 0,
+      required: true,
+    },
+    {
+      key: "slot",
+      label: "槽位 (Slot)",
+      type: "integer",
+      storage: "connectionConfig",
+      defaultValue: 1,
+      required: true,
+    },
+    {
+      key: "node",
+      label: "DB 点位列表",
+      type: "json",
+      placeholder:
+        "[\n  {\n    \"dbNumber\": 79,\n    \"offset\": 0,\n    \"bit\": 0,\n    \"dataType\": \"bool\",\n    \"comment\": \"4线运行\"\n  },\n  {\n    \"dbNumber\": 79,\n    \"offset\": 2,\n    \"dataType\": \"int\",\n    \"comment\": \"4线东北筐生产计数\"\n  },\n  {\n    \"dbNumber\": 79,\n    \"offset\": 6,\n    \"length\": 10,\n    \"dataType\": \"string\",\n    \"comment\": \"4线物料编码\"\n  }\n]",
+      defaultValue: [],
+      required: true,
+    },
+  ],
   sap_rfc: [],
   repair: [],
 };
@@ -226,6 +274,7 @@ const DATA_SOURCE_TYPE_FIELDS = {
 const DATA_SOURCE_TYPE_LABELS = {
   opcua: "OPC UA",
   modbus_tcp: "Modbus TCP",
+  s7: "S7 PLC",
   sap_rfc: "SAP RFC",
   database: "数据库",
   repair: "报修系统",
@@ -233,8 +282,8 @@ const DATA_SOURCE_TYPE_LABELS = {
 
 /** 列表批量设置轮询间隔：与后端 bulk-refresh-interval + 当前 source_type 筛选一致 */
 const DATA_SOURCE_BULK_REFRESH_TOOLBAR = {
-  opcua: { inputLabel: "轮询时间（秒）", toastName: "OPC UA" },
   modbus_tcp: { inputLabel: "轮询(s)", toastName: "Modbus TCP" },
+  s7: { inputLabel: "轮询(s)", toastName: "S7 PLC" },
   sap_rfc: { inputLabel: "轮询(s)", toastName: "SAP RFC" },
   database: { inputLabel: "轮询(s)", toastName: "数据库" },
   repair: { inputLabel: "轮询(s)", toastName: "报修系统" },
@@ -246,6 +295,13 @@ function buildDataSourceResources() {
     const label = DATA_SOURCE_TYPE_LABELS[sourceType];
     const customFields = DATA_SOURCE_TYPE_FIELDS[sourceType];
     const resourceKey = dataSourceResourceKey(sourceType);
+    const isOpcUa = sourceType === "opcua";
+    const baseFields = isOpcUa
+      ? DATA_SOURCE_BASE_FIELDS.filter((f) => f.key !== "refreshIntervalSeconds")
+      : DATA_SOURCE_BASE_FIELDS;
+    const columns = isOpcUa
+      ? DATA_SOURCE_BASE_COLUMNS.filter((c) => c.key !== "refreshIntervalSeconds")
+      : DATA_SOURCE_BASE_COLUMNS;
     const resource = {
       label,
       itemLabel: `${label} 数据源`,
@@ -255,10 +311,11 @@ function buildDataSourceResources() {
       fixedListParams: { source_type: sourceType },
       supportsTestConnection: true,
       supportsHistory: sourceType === "opcua",
-      columns: DATA_SOURCE_BASE_COLUMNS,
+      supportsCopyAsNew: sourceType === "opcua",
+      columns,
       queryFields: DATA_SOURCE_BASE_QUERY_FIELDS,
       fields: [
-        ...DATA_SOURCE_BASE_FIELDS,
+        ...baseFields,
         ...customFields,
         ...RESERVED_FIELDS,
       ],
@@ -287,6 +344,7 @@ export function dataSourceResourceKey(sourceType) {
   const map = {
     opcua: "dataSourceOpcua",
     modbus_tcp: "dataSourceModbusTcp",
+    s7: "dataSourceS7",
     sap_rfc: "dataSourceSapRfc",
     database: "dataSourceDatabase",
     repair: "dataSourceRepair",
@@ -581,6 +639,7 @@ export const resourceDefinitions = {
         label: "轮播子页面顺序",
         type: "screenPageTransfer",
         screenKeyField: "screenKey",
+        areaIdField: "areaId",
         defaultValue: [],
       },
       { key: "moduleSettings", label: "模块开关", type: "json", defaultValue: {} },
@@ -630,6 +689,8 @@ export const resourceDefinitions = {
       { key: "pageKeyLabel", label: "子页面" },
       { key: "bindingSourceType", label: "数据源类型", options: DATA_SOURCE_BINDING_CATEGORY_OPTIONS },
       { key: "dataSourceIds", label: "数据源", cellFormat: "idCount" },
+      { key: "realtimeLayout", label: "实时监控模板", options: REALTIME_LAYOUT_OPTIONS, showWhenPageKey: "realtime" },
+      { key: "realtimeDemoMode", label: "展示模式", showWhenPageKey: "realtime" },
       { key: "energyEquipmentIds", label: "能耗表计", cellFormat: "idCount" },
       { key: "isEnabled", label: "启用" },
     ],
@@ -644,7 +705,8 @@ export const resourceDefinitions = {
         label: "所属区域",
         type: "resourceSelect",
         resource: "areas",
-        allowBlank: true,
+        allowBlank: false,
+        required: true,
         defaultValue: "",
       },
       {
@@ -678,6 +740,31 @@ export const resourceDefinitions = {
         filterByField: "bindingSourceType",
         filterOptionKey: "sourceType",
         defaultValue: [],
+      },
+      {
+        key: "realtimeLayout",
+        label: "实时监控模板",
+        type: "select",
+        defaultValue: "",
+        options: REALTIME_LAYOUT_OPTIONS,
+        visibleWhen: { field: "pageKey", value: "realtime" },
+      },
+      {
+        key: "realtimeDemoMode",
+        label: "展示模式（全部在线演示数据）",
+        type: "checkbox",
+        defaultValue: true,
+        visibleWhen: { field: "pageKey", value: "realtime" },
+      },
+      {
+        key: "deviceIds",
+        label: "监控设备（可选，决定卡片标题）",
+        type: "resourceMultiSelectFiltered",
+        resource: "devices",
+        filterByField: "areaId",
+        filterOptionKey: "areaId",
+        defaultValue: [],
+        visibleWhen: { field: "pageKey", value: "realtime" },
       },
       {
         key: "energyEquipmentIds",
@@ -884,6 +971,25 @@ export function createEmptyQuery(resourceDefinition) {
   return nextState;
 }
 
+/** 从已有条目生成「复制新增」表单：编码/名称加后缀，预留字段清空。 */
+export function createCopyFormFromItem(resourceDefinition, item, { copyIndex = 0, existingCodes = new Set() } = {}) {
+  const form = createFormFromItem(resourceDefinition, item);
+  const baseCode = String(form.code || "item").replace(/_copy\d*$/, "");
+  let candidate = copyIndex === 0 ? `${baseCode}_copy` : `${baseCode}_copy${copyIndex + 1}`;
+  let n = Math.max(copyIndex, 1);
+  while (existingCodes.has(candidate)) {
+    candidate = `${baseCode}_copy${n}`;
+    n += 1;
+  }
+  existingCodes.add(candidate);
+  form.code = candidate;
+  const baseName = String(form.name || form.code || "").replace(/\s*\(复制\d*\)\s*$/, "");
+  form.name = copyIndex === 0 ? `${baseName} (复制)` : `${baseName} (复制${copyIndex + 1})`;
+  for (const key of RESERVED_FIELD_KEYS) {
+    form[key] = "";
+  }
+  return form;
+}
 
 export function createFormFromItem(resourceDefinition, item) {
   const nextState = {};
@@ -1020,7 +1126,19 @@ function formatCstDateTime(value) {
 }
 
 
-export function formatCellValue(value, column) {
+export function fieldVisibleForForm(field, formState) {
+  const w = field.visibleWhen;
+  if (!w) {
+    return true;
+  }
+  return String(formState[w.field] ?? "") === String(w.value);
+}
+
+
+export function formatCellValue(value, column, row) {
+  if (column?.showWhenPageKey && row?.pageKey !== column.showWhenPageKey) {
+    return "-";
+  }
   if (column?.cellFormat === "cstDateTime") {
     return formatCstDateTime(value);
   }

@@ -3288,6 +3288,13 @@ html[data-theme="dark"] {
   height: auto;
   min-height: 0;
   overflow-y: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.screen-grid-left-realtime::-webkit-scrollbar {
+  width: 0 !important;
+  height: 0 !important;
 }
 
 .screen-grid-realtime {
@@ -3300,6 +3307,18 @@ html[data-theme="dark"] {
 }
 
 .screen-grid-realtime::-webkit-scrollbar {
+  width: 0 !important;
+  height: 0 !important;
+}
+
+.screen-grid-left-realtime .industrial-realtime-grid,
+.screen-grid-realtime .industrial-realtime-grid {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.screen-grid-left-realtime .industrial-realtime-grid::-webkit-scrollbar,
+.screen-grid-realtime .industrial-realtime-grid::-webkit-scrollbar {
   width: 0 !important;
   height: 0 !important;
 }
@@ -4253,6 +4272,316 @@ html[data-theme="dark"] {
   text-align: right;
 }
 
+.cnc-syntec-alarm-strip {
+  display: none;
+}
+
+/* —— 新代 CNC 卡片（左色条 + 仪表盘） —— */
+.syntec-card {
+  --syntec-accent: rgba(130, 140, 160, 0.85);
+  background: rgba(8, 12, 20, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 12px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 0;
+  overflow: hidden;
+  padding: 14px 16px 12px 18px;
+  position: relative;
+}
+
+.syntec-card::before {
+  background: var(--syntec-accent);
+  border-radius: 12px 0 0 12px;
+  bottom: 0;
+  content: "";
+  left: 0;
+  position: absolute;
+  top: 0;
+  width: 4px;
+}
+
+.syntec-card--green {
+  --syntec-accent: #3ed084;
+}
+
+.syntec-card--yellow {
+  --syntec-accent: #ebbe48;
+}
+
+.syntec-card--red {
+  --syntec-accent: #ff6060;
+}
+
+.syntec-card--gray {
+  --syntec-accent: #8a94a8;
+}
+
+.syntec-card--pulse {
+  animation: cnc-alarm-pulse 1.6s ease-in-out infinite;
+  cursor: pointer;
+}
+
+.syntec-alarm-badge {
+  align-items: center;
+  background: #ff4d4d;
+  border-radius: 50%;
+  color: #fff;
+  display: flex;
+  font-size: 0.75rem;
+  font-weight: 700;
+  height: 20px;
+  justify-content: center;
+  position: absolute;
+  right: 10px;
+  top: 10px;
+  width: 20px;
+  z-index: 1;
+}
+
+.syntec-head {
+  align-items: flex-start;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  padding-right: 18px;
+}
+
+.syntec-title {
+  color: #f0f6ff;
+  font-size: 1rem;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  line-height: 1.3;
+  margin: 0;
+}
+
+.syntec-meta {
+  color: rgba(155, 180, 215, 0.78);
+  font-size: 0.72rem;
+  margin: 4px 0 0;
+}
+
+.syntec-state {
+  border-radius: 6px;
+  flex-shrink: 0;
+  font-size: 0.74rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  padding: 4px 10px;
+}
+
+.syntec-state--green {
+  background: rgba(62, 208, 132, 0.14);
+  color: #7ae8ae;
+}
+
+.syntec-state--yellow {
+  background: rgba(235, 190, 72, 0.14);
+  color: #f0d078;
+}
+
+.syntec-state--red {
+  background: rgba(255, 96, 96, 0.16);
+  color: #ffaaaa;
+}
+
+.syntec-state--gray {
+  background: rgba(130, 140, 160, 0.14);
+  color: #b8c0d0;
+}
+
+.syntec-offline {
+  background: rgba(180, 50, 50, 0.12);
+  border-radius: 6px;
+  color: #ffb0b0;
+  font-size: 0.74rem;
+  padding: 6px 8px;
+}
+
+.syntec-dash {
+  align-items: end;
+  display: grid;
+  gap: 8px 16px;
+  grid-template-columns: 1.4fr 1fr 0.9fr;
+}
+
+.syntec-dash-label {
+  color: rgba(150, 175, 210, 0.72);
+  display: block;
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  margin-bottom: 4px;
+}
+
+.syntec-dash-rpm-val {
+  align-items: baseline;
+  display: flex;
+  gap: 4px;
+}
+
+.syntec-dash-rpm-val strong {
+  color: #ffffff;
+  font-size: 2rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+
+.syntec-dash-rpm-val em {
+  color: rgba(170, 195, 230, 0.7);
+  font-size: 0.78rem;
+  font-style: normal;
+}
+
+.syntec-dash-load {
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+}
+
+.syntec-dash-load .cnc-load-ring-wrap {
+  height: 68px;
+  width: 68px;
+}
+
+.syntec-dash-load .cnc-load-ring-label {
+  font-size: 0.78rem;
+}
+
+.syntec-dash-feed strong {
+  color: #eef4ff;
+  display: block;
+  font-size: 1.35rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+.syntec-prog {
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 8px;
+  display: grid;
+  gap: 6px 12px;
+  grid-template-columns: 1fr auto auto;
+  padding: 10px 12px;
+}
+
+.syntec-prog-main {
+  display: flex;
+  gap: 8px;
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+.syntec-prog-label {
+  color: rgba(150, 175, 210, 0.72);
+  flex-shrink: 0;
+  font-size: 0.68rem;
+}
+
+.syntec-prog-name {
+  color: #e8f2ff;
+  font-size: 0.8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.syntec-prog-line {
+  align-items: center;
+  color: #d8e8ff;
+  display: flex;
+  font-size: 0.78rem;
+  gap: 6px;
+}
+
+.syntec-prog-time {
+  color: rgba(150, 175, 210, 0.75);
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  justify-self: end;
+}
+
+.syntec-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.syntec-tags span {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  color: rgba(200, 220, 245, 0.9);
+  font-size: 0.72rem;
+  padding: 3px 8px;
+}
+
+.syntec-alarm-text {
+  background: rgba(255, 70, 70, 0.1);
+  border-left: 3px solid #ff6060;
+  border-radius: 0 6px 6px 0;
+  color: #ffb8b8;
+  font-size: 0.74rem;
+  overflow: hidden;
+  padding: 6px 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.syntec-foot {
+  color: rgba(120, 145, 175, 0.6);
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+  margin-top: auto;
+  text-align: right;
+}
+
+.industrial-realtime-grid:has(.syntec-card) {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr));
+}
+
+.cnc-param-grid {
+  display: grid;
+  gap: 12px;
+  padding: 4px 0 8px;
+}
+
+.cnc-param-group-title {
+  color: #9ec5ef;
+  font-size: 0.82rem;
+  margin: 0 0 8px;
+}
+
+.cnc-param-group-items {
+  display: grid;
+  gap: 6px;
+}
+
+.cnc-param-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.cnc-param-k {
+  color: rgba(160, 185, 215, 0.85);
+  font-size: 0.78rem;
+}
+
+.cnc-param-v {
+  color: #e8f2ff;
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.cnc-param-v--bad {
+  color: #ff9a9a;
+}
+
 .simulation-panel .panel-header {
   flex-shrink: 0;
 }
@@ -4282,6 +4611,400 @@ html[data-theme="dark"] {
 }
 
 .simulation-panel .placeholder-copy-wide.simulation-placeholder-body {
+  align-content: start;
+  min-height: 0;
+}
+
+/* 销轴产线布局：工位固定宽度（按 7 列基准），少工位产线右对齐、左侧留空 */
+.xz-line-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.xz-line-board {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 16px;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding-right: 2px;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.xz-line-board::-webkit-scrollbar {
+  width: 0 !important;
+  height: 0 !important;
+}
+
+.xz-line-row {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.xz-line-row-label {
+  color: rgba(170, 210, 255, 0.92);
+  font-size: 0.9rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.xz-line-track {
+  --xz-slot-gap: 8px;
+  --xz-slot-ref-cols: 7;
+  --xz-slot-width: calc(
+    (100% - (var(--xz-slot-ref-cols) - 1) * var(--xz-slot-gap)) / var(--xz-slot-ref-cols)
+  );
+  align-items: stretch;
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  gap: var(--xz-slot-gap);
+  justify-content: flex-end;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.xz-line-track--align-end {
+  /* 1 号线等少工位：与 5 号线同宽卡片，整体靠右，左侧自然留空 */
+  justify-content: flex-end;
+}
+
+.xz-line-slot {
+  display: flex;
+  flex: 0 0 var(--xz-slot-width);
+  flex-direction: column;
+  max-width: var(--xz-slot-width);
+  min-height: 0;
+  min-width: 0;
+  width: var(--xz-slot-width);
+}
+
+.xz-line-slot > .syntec-card {
+  flex: 1 1 auto;
+  height: 100%;
+  width: 100%;
+}
+
+/* 产线槽位内：完整信息；各行卡片等高同宽 */
+.syntec-card--line {
+  box-sizing: border-box;
+  gap: 10px;
+  height: 100%;
+  min-height: 360px;
+  padding: 12px 12px 10px 16px;
+  width: 100%;
+}
+
+.syntec-card--line .syntec-head {
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-right: 12px;
+}
+
+.syntec-card--line .syntec-title {
+  font-size: clamp(0.78rem, 0.85vw, 0.95rem);
+  line-height: 1.35;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.syntec-card--line .syntec-meta {
+  font-size: clamp(0.62rem, 0.65vw, 0.72rem);
+  line-height: 1.35;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.syntec-card--line .syntec-state {
+  font-size: clamp(0.62rem, 0.65vw, 0.72rem);
+  padding: 3px 8px;
+}
+
+.syntec-card--line .syntec-dash {
+  gap: 8px 6px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 0.85fr) minmax(0, 0.75fr);
+}
+
+.syntec-card--line .syntec-dash-rpm-val strong {
+  font-size: clamp(1.15rem, 1.5vw, 1.85rem);
+}
+
+.syntec-card--line .syntec-dash-rpm-val em {
+  font-size: 0.68rem;
+}
+
+.syntec-card--line .syntec-dash-load .cnc-load-ring-wrap {
+  height: clamp(52px, 5vw, 64px);
+  margin: 0 auto;
+  width: clamp(52px, 5vw, 64px);
+}
+
+.syntec-card--line .syntec-dash-load .cnc-load-ring-label {
+  font-size: 0.68rem;
+}
+
+.syntec-card--line .syntec-dash-feed strong {
+  font-size: clamp(0.95rem, 1.1vw, 1.25rem);
+}
+
+.syntec-card--line .syntec-prog {
+  gap: 6px;
+  grid-template-columns: 1fr;
+  padding: 8px 10px;
+}
+
+.syntec-card--line .syntec-prog-main {
+  flex-direction: column;
+  gap: 2px;
+}
+
+.syntec-card--line .syntec-prog-name {
+  font-size: clamp(0.68rem, 0.72vw, 0.78rem);
+  white-space: normal;
+  word-break: break-all;
+}
+
+.syntec-card--line .syntec-prog-line,
+.syntec-card--line .syntec-prog-time {
+  font-size: clamp(0.64rem, 0.68vw, 0.74rem);
+}
+
+.syntec-card--line .syntec-prog-time {
+  justify-self: start;
+}
+
+.syntec-card--line .syntec-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.syntec-card--line .syntec-tags span {
+  font-size: clamp(0.6rem, 0.65vw, 0.7rem);
+  padding: 3px 6px;
+}
+
+.syntec-card--line .syntec-alarm-text {
+  font-size: clamp(0.62rem, 0.68vw, 0.72rem);
+  white-space: normal;
+  word-break: break-word;
+}
+
+.syntec-card--line .syntec-foot {
+  font-size: clamp(0.58rem, 0.62vw, 0.68rem);
+  margin-top: auto;
+}
+
+/* 机器手：与车床同套 syntec 外壳 */
+.syntec-card--robot .xz-robot-bins {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 1fr 1fr;
+}
+
+.syntec-card--robot .xz-robot-bin {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(120, 180, 230, 0.16);
+  border-radius: 8px;
+  display: grid;
+  gap: 4px;
+  padding: 8px 10px;
+}
+
+.syntec-card--robot .xz-robot-bin-label {
+  color: rgba(150, 180, 210, 0.8);
+  font-size: 0.68rem;
+}
+
+.syntec-card--robot .xz-robot-bin-value {
+  color: #e8f4ff;
+  font-size: 1rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.syntec-card--robot .xz-robot-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.syntec-card--robot .cnc-robot-col-head {
+  display: none;
+}
+
+.syntec-card--robot .cnc-robot-plain-k {
+  font-size: clamp(0.62rem, 0.66vw, 0.72rem);
+}
+
+.syntec-card--robot .cnc-robot-plain-v {
+  font-size: clamp(0.62rem, 0.66vw, 0.72rem);
+}
+
+.syntec-card--robot .xz-robot-material {
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 6px;
+  color: rgba(180, 210, 240, 0.9);
+  font-size: clamp(0.62rem, 0.68vw, 0.72rem);
+  padding: 6px 8px;
+  white-space: normal;
+  word-break: break-all;
+}
+
+.xz-line-placeholder-body {
+  align-items: center;
+  color: rgba(150, 175, 205, 0.75);
+  display: grid;
+  flex: 1;
+  gap: 8px;
+  justify-items: center;
+  min-height: 120px;
+  text-align: center;
+}
+
+.xz-line-placeholder-body p {
+  font-size: 0.74rem;
+  line-height: 1.4;
+  margin: 0;
+}
+
+.xz-line-placeholder-icon {
+  color: rgba(120, 150, 180, 0.45);
+  font-size: 1.6rem;
+}
+
+.xz-line-empty {
+  color: rgba(160, 190, 220, 0.85);
+  margin: 0;
+  padding: 24px 8px;
+}
+
+.syntec-card--compact {
+  min-height: 280px;
+  padding: 12px;
+}
+
+.syntec-card--compact .syntec-title {
+  font-size: 0.92rem;
+}
+
+.screen-grid-left-realtime .xz-line-panel,
+.screen-grid-realtime .xz-line-panel {
+  min-height: calc(100vh - 240px);
+}
+
+.screen-grid-left-realtime .xz-line-board,
+.screen-grid-realtime .xz-line-board {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* 套筒滚子产线：9 行 × 3 列，与车间 IP 布置图一致 */
+.ttgz-line-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.ttgz-line-board {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 10px;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding-right: 2px;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.ttgz-line-board::-webkit-scrollbar {
+  width: 0 !important;
+  height: 0 !important;
+}
+
+.ttgz-line-row {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.ttgz-line-row-label {
+  color: rgba(170, 210, 255, 0.92);
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+.ttgz-line-track {
+  align-items: stretch;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  min-height: 0;
+  min-width: 0;
+}
+
+.ttgz-line-slot {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+
+.ttgz-line-slot--empty {
+  min-height: 0;
+  pointer-events: none;
+  visibility: hidden;
+}
+
+.ttgz-line-slot > .syntec-card {
+  flex: 1 1 auto;
+  height: 100%;
+  width: 100%;
+}
+
+.ttgz-line-panel .syntec-card--line {
+  box-sizing: border-box;
+  gap: 8px;
+  height: 100%;
+  min-height: 220px;
+  padding: 12px;
+}
+
+.ttgz-line-panel .syntec-title {
+  font-size: 0.88rem;
+}
+
+.ttgz-line-panel .syntec-meta {
+  font-size: 0.72rem;
+}
+
+.ttgz-line-panel .syntec-dash-rpm-val strong {
+  font-size: 1.05rem;
+}
+
+.ttgz-line-empty {
+  color: var(--screen-muted);
+  font-size: 0.9rem;
+  padding: 24px 12px;
+  text-align: center;
+}
+
+.screen-grid-left-realtime .ttgz-line-panel,
+.screen-grid-realtime .ttgz-line-panel {
+  min-height: calc(100vh - 240px);
+}
+
+.screen-grid-left-realtime .ttgz-line-board,
+.screen-grid-realtime .ttgz-line-board {
+  flex: 1 1 auto;
   min-height: 0;
 }
 

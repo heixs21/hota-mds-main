@@ -5,6 +5,7 @@ import { humanizeAdminApiError, humanizeJsonFieldSyntaxError } from "../adminUse
 import {
   createEmptyForm,
   createEmptyQuery,
+  createCopyFormFromItem,
   createFormFromItem,
   RESERVED_FIELD_KEYS,
   resourceDefinitions,
@@ -49,6 +50,7 @@ export function ResourceEditor({ activeResource, token, onUnauthorized }) {
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isBatchDeleting, setIsBatchDeleting] = useState(false);
+  const [isCopying, setIsCopying] = useState(false);
   const [isTestingConnection, setIsTestingConnection] = useState(false);
   const [toast, setToast] = useState(null);
   const [page, setPage] = useState(1);
@@ -523,6 +525,93 @@ export function ResourceEditor({ activeResource, token, onUnauthorized }) {
     setModalState({ mode: "edit", item });
   }
 
+  function buildExistingCodeSet(extraItems = items) {
+    return new Set(extraItems.map((row) => String(row.code ?? "").trim()).filter(Boolean));
+  }
+
+  function handleCopyRow(item) {
+    if (!item) {
+      return;
+    }
+    const existingCodes = buildExistingCodeSet();
+    const copyForm = createCopyFormFromItem(resourceDefinition, item, { existingCodes });
+    setSelectedItem(null);
+    setModalState({ mode: "create", item: null, initialForm: copyForm });
+  }
+
+  async function handleBatchCopyAsNew() {
+    if (checkedIds.size === 0 || !resourceDefinition.supportsCopyAsNew) {
+      return;
+    }
+    const selected = items.filter((item) => checkedIds.has(item.id));
+    if (selected.length === 0) {
+      return;
+    }
+    if (selected.length === 1) {
+      handleCopyRow(selected[0]);
+      return;
+    }
+    if (
+      !window.confirm(
+        `确定要复制选中的 ${selected.length} 条${resourceDefinition.itemLabel}并新增吗？将自动为编码添加 _copy 后缀。`,
+      )
+    ) {
+      return;
+    }
+
+    setIsCopying(true);
+    showToast(`正在复制新增 ${selected.length} 条记录...`, { variant: "info" });
+    const existingCodes = buildExistingCodeSet();
+    let successCount = 0;
+    try {
+      for (let i = 0; i < selected.length; i += 1) {
+        const item = selected[i];
+        const copyForm = createCopyFormFromItem(resourceDefinition, item, {
+          copyIndex: i,
+          existingCodes,
+        });
+        let payload;
+        try {
+          payload = buildPayloadFromForm(resourceDefinition, copyForm);
+        } catch (formErr) {
+          if (formErr && formErr.kind === "json") {
+            showToast(humanizeJsonFieldSyntaxError(formErr.field, formErr.error), { variant: "error" });
+            return;
+          }
+          if (formErr && formErr.kind === "integer") {
+            showToast(`「${formErr.field.label}」须填写有效整数。`, { variant: "error" });
+            return;
+          }
+          throw formErr;
+        }
+        for (const key of RESERVED_FIELD_KEYS) {
+          payload[key] = "";
+        }
+        await apiRequest(resourceDefinition.endpoint, { method: "POST", token, body: payload });
+        successCount += 1;
+      }
+      await reloadCurrentResource(null, page, pageSize, queryApplied);
+      showToast(`已成功复制新增 ${successCount} 条${resourceDefinition.itemLabel}。`, { variant: "success" });
+    } catch (error) {
+      if (error.status === 401) {
+        onUnauthorized();
+        return;
+      }
+      const partial = successCount > 0 ? `（已成功 ${successCount} 条）` : "";
+      showToast(
+        humanizeAdminApiError(error, resourceDefinition.fields, {
+          fallback: `复制新增失败${partial}，请检查编码是否重复后重试。`,
+        }),
+        { variant: httpErrorToastVariant(error.status) },
+      );
+      if (successCount > 0) {
+        await reloadCurrentResource(null, page, pageSize, queryApplied);
+      }
+    } finally {
+      setIsCopying(false);
+    }
+  }
+
   function handleShowHistory(item) {
     setHistoryTarget(item);
   }
@@ -850,6 +939,27 @@ export function ResourceEditor({ activeResource, token, onUnauthorized }) {
                   </div>
                 ) : null
               }
+              queryActionsSuffix={
+                resourceDefinition.supportsCopyAsNew ? (
+                  <span
+                    className={`bulk-set-button-wrap${checkedIds.size === 0 ? " bulk-set-button-wrap--hint" : ""}`}
+                  >
+                    {checkedIds.size === 0 ? (
+                      <span className="bulk-set-tooltip" role="tooltip">
+                        先勾选需要复制的记录
+                      </span>
+                    ) : null}
+                    <button
+                      className="ghost-button"
+                      disabled={isLoading || isCopying || checkedIds.size === 0}
+                      onClick={handleBatchCopyAsNew}
+                      type="button"
+                    >
+                      {isCopying ? "复制中..." : "复制新增"}
+                    </button>
+                  </span>
+                ) : null
+              }
               queryFields={resourceDefinition.queryFields ?? []}
               queryState={queryDraft}
               relatedOptions={relatedOptions}
@@ -928,6 +1038,7 @@ export function ResourceEditor({ activeResource, token, onUnauthorized }) {
 
       {modalState && useModalForm ? (
         <ResourceModalForm
+          initialFormState={modalState.initialForm}
           initialItem={modalState.item}
           isSaving={isSaving}
           isTesting={isTestingConnection}

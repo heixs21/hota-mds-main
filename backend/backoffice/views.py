@@ -34,7 +34,7 @@ from .models import (
     ScreenPageBinding,
 )
 from .opcua_history_services import OpcUaHistoryWriteContext
-from .connection_test_services import test_database_connection, test_opcua_connection
+from .connection_test_services import test_database_connection, test_opcua_connection, test_s7_connection
 from .serializers import (
     AreaSerializer,
     CodeMappingSerializer,
@@ -562,6 +562,19 @@ class DataSourceConfigViewSet(AdminApiViewSet):
 
         if source_type in {"database", "energy_db", "schedule_db", "wms"}:
             result = test_database_connection(connection_config)
+            if not result.ok:
+                return error_response("CONNECTION_FAILED", result.message, 400)
+            return success_response(
+                "connection test ok",
+                {
+                    "sourceType": source_type,
+                    "checkedAt": timezone.now().isoformat(),
+                    "message": result.message,
+                },
+            )
+
+        if source_type == "s7":
+            result = test_s7_connection(connection_config, node=node)
             if not result.ok:
                 return error_response("CONNECTION_FAILED", result.message, 400)
             return success_response(

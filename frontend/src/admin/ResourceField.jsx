@@ -1,14 +1,11 @@
 import { useEffect, useState } from "react";
 
 import { ADMIN_TOKEN_STORAGE_KEY, apiRequest } from "../adminApi.js";
+import { fieldVisibleForForm } from "../adminResources.js";
 import { ScreenPageTransferField } from "./screen/ScreenPageTransferField.jsx";
 
 function matchesVisibleWhen(field, formState) {
-  const w = field.visibleWhen;
-  if (!w) {
-    return true;
-  }
-  return String(formState[w.field] ?? "") === String(w.value);
+  return fieldVisibleForForm(field, formState);
 }
 
 export function ResourceField({ field, formState, setFormState, relatedOptions }) {

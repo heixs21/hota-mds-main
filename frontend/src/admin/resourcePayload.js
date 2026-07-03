@@ -1,10 +1,13 @@
-import { OMIT_VALUE, parseFieldValue } from "../adminResources.js";
+import { OMIT_VALUE, fieldVisibleForForm, parseFieldValue } from "../adminResources.js";
 
 export function buildPayloadFromForm(resourceDefinition, formState) {
   const payload = {};
   const nestedBuckets = {};
 
   for (const field of resourceDefinition.fields) {
+    if (!fieldVisibleForForm(field, formState)) {
+      continue;
+    }
     let parsedValue;
     try {
       parsedValue = parseFieldValue(field, formState[field.key], formState);

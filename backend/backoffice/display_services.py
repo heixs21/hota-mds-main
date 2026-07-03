@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import concurrent.futures
 import logging
 import re
 import threading
@@ -29,7 +28,7 @@ from .models import (
     ScreenConfig,
     ScreenPageBinding,
 )
-from .connection_test_services import read_opcua_nodes, test_database_connection, test_opcua_connection
+from .connection_test_services import read_opcua_nodes, read_s7_nodes, test_database_connection, test_opcua_connection, test_s7_connection
 from .opcua_history_services import OpcUaHistoryWriteContext
 from .serializers import (
     DataSourceHealthSnapshotSerializer,
@@ -285,6 +284,9 @@ def get_screen_payload(screen_key: str, area_code: str | None = None) -> dict:
         payload["content"]["deviceRealtimeMonitor"] = _build_device_realtime_monitor(
             area,
             data_source_ids=_page_binding_data_source_ids(screen_config, "realtime"),
+            realtime_layout=_page_binding_realtime_layout(screen_config, "realtime"),
+            device_ids=_page_binding_device_ids(screen_config, "realtime"),
+            demo_mode=_page_binding_realtime_demo_mode(screen_config, "realtime"),
         )
 
     # 能耗数据页面
@@ -688,6 +690,9 @@ def _apply_screen_page_bindings(base: dict, config: "ScreenConfig | None", area)
             "bindingSourceType": b.binding_source_type or None,
             "dataSourceIds": list(b.data_source_ids or []),
             "energyEquipmentIds": [str(x) for x in (b.energy_equipment_ids or []) if str(x).strip()],
+            "realtimeLayout": (b.realtime_layout or "").strip() or None,
+            "realtimeDemoMode": bool(getattr(b, "realtime_demo_mode", True)),
+            "deviceIds": [i for i in (b.device_ids or []) if isinstance(i, int) and i > 0],
         }
         for pk in page_order
         if (b := bindings_map.get(pk)) is not None
@@ -998,7 +1003,9 @@ _RE_NCK_SP_DRIVE_LOAD_PATH = re.compile(r"^/Nck/Spindle/driveLoad\[u(\d+),\s*(\d
 
 
 def _opcua_node_path(node_id: str) -> str:
-    return (node_id or "").strip().removeprefix("ns=2;s=")
+    from .connection_test_services import _opc_node_path_key
+
+    return _opc_node_path_key(node_id)
 
 
 def _build_opcua_value_map(read_items) -> dict[str, tuple[bool, object]]:
@@ -1298,14 +1305,9 @@ def _build_cnc_dashboard_view(
 
 
 def _normalize_opcua_node_config(source: DataSourceConfig) -> list[dict]:
-    node_config_raw = source.node if isinstance(source.node, list) else []
-    node_config: list[dict] = []
-    for cfg_item in node_config_raw:
-        if isinstance(cfg_item, str):
-            node_config.append({"nodeId": cfg_item, "comment": ""})
-        elif isinstance(cfg_item, dict):
-            node_config.append(cfg_item)
-    return node_config
+    from .connection_test_services import _normalize_opcua_nodes
+
+    return _normalize_opcua_nodes(source.node, source.connection_config or {})
 
 
 def _classify_opcua_data_source(source: DataSourceConfig) -> str:
@@ -1337,17 +1339,127 @@ def _production_line_for_source(source: DataSourceConfig, area) -> ProductionLin
     return None
 
 
-def _build_opcua_realtime_card_payload(source: DataSourceConfig, area) -> dict:
-    """单 OPC 数据源一张卡（镗床/CNC 仪表盘结构）。"""
-    card_devices = list(source.devices.filter(area=area, is_active=True).order_by("code")[:2])
-    card_name = ", ".join([f"{d.code}-{d.name}" for d in card_devices]) or source.name
-    display_title = card_devices[0].name if len(card_devices) == 1 else card_name
+def _name_similarity(a: str, b: str) -> int:
+    left = (a or "").strip().lower()
+    right = (b or "").strip().lower()
+    if not left or not right:
+        return 0
+    if left == right:
+        return 10000
+    if left in right:
+        return 1000 + len(left)
+    if right in left:
+        return 1000 + len(right)
+    suffix = 0
+    for ca, cb in zip(reversed(left), reversed(right)):
+        if ca != cb:
+            break
+        suffix += 1
+    return suffix
+
+
+def _pick_primary_opc_device(source: DataSourceConfig, devices: list[Device]) -> Device | None:
+    if not devices:
+        return None
+    if len(devices) == 1:
+        return devices[0]
+    source_label = (source.name or source.code or "").strip()
+    return max(
+        devices,
+        key=lambda device: _name_similarity(device.name or device.code or "", source_label),
+    )
+
+
+def _resolve_opc_card_display(
+    source: DataSourceConfig,
+    area,
+    *,
+    preferred_device_ids: list[int] | None = None,
+) -> tuple[str, str, Device | None]:
+    """
+    返回 (display_title, subtitle, primary_device)。
+
+    标题固定为数据源名称（与子页面绑定的 OPC 源一致），
+    避免 M2M 关联了其它设备（如双主轴）时标题被带偏。
+    """
+    devices = list(source.devices.filter(area=area, is_active=True).order_by("code"))
+    preferred = [i for i in (preferred_device_ids or []) if isinstance(i, int) and i > 0]
+    if preferred:
+        preferred_set = set(preferred)
+        devices = [d for d in devices if d.pk in preferred_set]
+        if not devices:
+            devices = list(
+                Device.objects.filter(pk__in=preferred, area=area, is_active=True).order_by("code")
+            )
+
+    primary = _pick_primary_opc_device(source, devices)
+    display_title = (source.name or source.code or "未命名设备").strip()
+    return display_title, "", primary
+
+
+def _build_realtime_dashboard_view(
+    layout: str,
+    vm: dict[str, tuple[bool, object]],
+    *,
+    offline: bool,
+    device_model_fallback: str,
+    alarm_text: str = "",
+) -> dict:
+    from .realtime_dashboard_services import (
+        REALTIME_LAYOUT_PARAMETER_GRID,
+        REALTIME_LAYOUT_SYNTEC_CNC,
+        build_parameter_grid_dashboard_view,
+        build_syntec_cnc_dashboard_view,
+    )
+
+    if layout == REALTIME_LAYOUT_SYNTEC_CNC:
+        return build_syntec_cnc_dashboard_view(
+            vm,
+            offline=offline,
+            device_model_fallback=device_model_fallback,
+            alarm_text=alarm_text or "",
+        )
+    if layout == REALTIME_LAYOUT_PARAMETER_GRID:
+        return build_parameter_grid_dashboard_view(offline=offline)
+    return _build_cnc_dashboard_view(
+        vm,
+        offline=offline,
+        device_model_fallback=device_model_fallback,
+    )
+
+
+def _build_opcua_realtime_card_payload(
+    source: DataSourceConfig,
+    area,
+    *,
+    layout: str | None = None,
+    preferred_device_ids: list[int] | None = None,
+) -> dict:
+    """单 OPC 数据源一张卡；layout 决定仪表盘结构（镗孔 / 新代 / 参数列表）。"""
+    from .connection_test_services import nodes_for_opcua_connection
+    from .realtime_dashboard_services import (
+        REALTIME_LAYOUT_SYNTEC_CNC,
+        build_syntec_cnc_dashboard_view,
+        fetch_syntec_current_alarm_text,
+        find_syntec_current_alarm_node,
+        resolve_realtime_layout,
+    )
+
+    display_title, subtitle, primary_dev = _resolve_opc_card_display(
+        source,
+        area,
+        preferred_device_ids=preferred_device_ids,
+    )
+    card_name = display_title
     node_config = _normalize_opcua_node_config(source)
+    nodes_for_read = nodes_for_opcua_connection(node_config)
     base_ts = timezone.localtime().isoformat()
+    resolved_layout = resolve_realtime_layout(source, layout)
 
     def _empty_detail_payload(reason: str, *, offline: bool) -> dict:
         vm_empty: dict[str, tuple[bool, object]] = {}
-        dash = _build_cnc_dashboard_view(
+        dash = _build_realtime_dashboard_view(
+            resolved_layout,
             vm_empty,
             offline=offline,
             device_model_fallback="",
@@ -1357,8 +1469,9 @@ def _build_opcua_realtime_card_payload(source: DataSourceConfig, area) -> dict:
             "sourceName": source.name,
             "deviceName": display_title,
             "displayTitle": display_title,
-            "subtitle": card_name if card_name != display_title else "",
+            "subtitle": subtitle,
             "mergeLayout": False,
+            "dashboardTemplate": resolved_layout,
             "status": "offline" if offline else "online",
             "offlineReason": reason,
             "updatedAt": base_ts,
@@ -1367,10 +1480,10 @@ def _build_opcua_realtime_card_payload(source: DataSourceConfig, area) -> dict:
             **dash,
         }
 
-    if not node_config:
+    if not nodes_for_read:
         return _empty_detail_payload("未配置 OPC UA 节点列表", offline=True)
 
-    first_dev = card_devices[0] if card_devices else None
+    first_dev = primary_dev
     history = OpcUaHistoryWriteContext(
         data_source_id=source.pk,
         trigger=OpcUaHistorySample.TRIGGER_DISPLAY_REALTIME,
@@ -1378,7 +1491,12 @@ def _build_opcua_realtime_card_payload(source: DataSourceConfig, area) -> dict:
         area_id=area.pk if area else None,
         caller_detail="_build_opcua_realtime_card_payload",
     )
-    read_result = read_opcua_nodes(source.connection_config or {}, node=node_config, history=history)
+    read_result = read_opcua_nodes(
+        source.connection_config or {},
+        node=nodes_for_read,
+        history=history,
+        data_source_id=source.pk,
+    )
     vm = _build_opcua_value_map(read_result.items)
     data_offline = bool(read_result.offline or len(read_result.items) == 0)
     offline_reason = ""
@@ -1387,10 +1505,29 @@ def _build_opcua_realtime_card_payload(source: DataSourceConfig, area) -> dict:
     elif len(read_result.items) == 0:
         offline_reason = "未配置可读取节点"
 
-    dash = _build_cnc_dashboard_view(
+    model_fallback = ""
+    if resolved_layout == "syntec_cnc":
+        model_fallback = "新代 CNC"
+
+    alarm_text = ""
+    if resolved_layout == REALTIME_LAYOUT_SYNTEC_CNC and not data_offline:
+        preliminary = build_syntec_cnc_dashboard_view(
+            vm,
+            offline=False,
+            device_model_fallback=model_fallback,
+        )
+        if preliminary.get("machineStatus", {}).get("code") == "alarm":
+            alarm_text = fetch_syntec_current_alarm_text(
+                source.connection_config or {},
+                find_syntec_current_alarm_node(node_config),
+            )
+
+    dash = _build_realtime_dashboard_view(
+        resolved_layout,
         vm,
         offline=data_offline,
-        device_model_fallback="",
+        device_model_fallback=model_fallback,
+        alarm_text=alarm_text,
     )
 
     parameters = []
@@ -1432,8 +1569,9 @@ def _build_opcua_realtime_card_payload(source: DataSourceConfig, area) -> dict:
         "sourceName": source.name,
         "deviceName": display_title,
         "displayTitle": display_title,
-        "subtitle": card_name if card_name != display_title else "",
+        "subtitle": subtitle,
         "mergeLayout": False,
+        "dashboardTemplate": resolved_layout,
         "status": "online" if online else "offline",
         "offlineReason": offline_reason,
         "updatedAt": base_ts,
@@ -1474,7 +1612,12 @@ def _build_robot_realtime_panel(source: DataSourceConfig | None, area) -> dict:
         area_id=area.pk if area else None,
         caller_detail="_build_robot_realtime_panel",
     )
-    read_result = read_opcua_nodes(source.connection_config or {}, node=node_config, history=history)
+    read_result = read_opcua_nodes(
+        source.connection_config or {},
+        node=node_config,
+        history=history,
+        data_source_id=source.pk,
+    )
     items = []
     for index, node_item in enumerate(read_result.items, start=1):
         resolved_comment = _resolve_node_comment({"comment": node_item.comment, "nodeId": node_item.node_id}, index)
@@ -1504,6 +1647,365 @@ def _build_robot_realtime_panel(source: DataSourceConfig | None, area) -> dict:
     }
 
 
+def _s7_item_by_comment(items, *keywords: str):
+    for item in items:
+        comment = item.comment or ""
+        if any(keyword in comment for keyword in keywords):
+            return item
+    return None
+
+
+def _s7_bool_from_item(item) -> bool | None:
+    if item is None or not item.ok:
+        return None
+    value = (item.value or "").strip().lower()
+    if value in {"true", "1", "yes", "on"}:
+        return True
+    if value in {"false", "0", "no", "off", ""}:
+        return False
+    return None
+
+
+def _s7_machine_status_from_items(items, *, offline: bool) -> dict:
+    if offline:
+        return {
+            "label": "离线",
+            "indicator": "gray",
+            "borderColor": "gray",
+            "alarmActive": False,
+        }
+    run = _s7_bool_from_item(_s7_item_by_comment(items, "运行"))
+    stop = _s7_bool_from_item(_s7_item_by_comment(items, "停止"))
+    fault = _s7_bool_from_item(_s7_item_by_comment(items, "故障"))
+    if fault:
+        return {
+            "label": "故障",
+            "indicator": "red",
+            "borderColor": "red",
+            "alarmActive": True,
+        }
+    if run:
+        return {
+            "label": "运行",
+            "indicator": "green",
+            "borderColor": "green",
+            "alarmActive": False,
+        }
+    if stop:
+        return {
+            "label": "停止",
+            "indicator": "yellow",
+            "borderColor": "yellow",
+            "alarmActive": False,
+        }
+    return {
+        "label": "待机",
+        "indicator": "gray",
+        "borderColor": "gray",
+        "alarmActive": False,
+    }
+
+
+def _build_s7_robot_card_payload(source: DataSourceConfig, area, line_number: int) -> dict:
+    base_ts = timezone.localtime().isoformat()
+    display_title = f"{line_number}号线"
+    connection_config = source.connection_config or {}
+    read_result, items = read_s7_nodes(connection_config, node=source.node)
+    offline = not read_result.ok
+    offline_reason = "" if not offline else (read_result.message or "S7 PLC 连接失败")
+
+    robot_items = []
+    for item in items:
+        robot_items.append(
+            {
+                "comment": item.comment,
+                "value": item.value if item.ok else "--",
+                "ok": item.ok,
+                "error": item.error,
+            }
+        )
+
+    ne_item = _s7_item_by_comment(items, "东北")
+    sw_item = _s7_item_by_comment(items, "西南")
+    material_item = _s7_item_by_comment(items, "物料")
+
+    return {
+        "sourceCode": source.code,
+        "sourceName": source.name,
+        "deviceName": display_title,
+        "displayTitle": display_title,
+        "subtitle": "机器手",
+        "mergeLayout": False,
+        "dashboardTemplate": "s7_robot",
+        "status": "online" if not offline else "offline",
+        "offlineReason": offline_reason,
+        "updatedAt": base_ts,
+        "machineStatus": _s7_machine_status_from_items(items, offline=offline),
+        "robot": {
+            "displayTitle": display_title,
+            "status": "online" if not offline else "offline",
+            "items": robot_items,
+        },
+        "s7Extras": {
+            "neCount": ne_item.value if ne_item and ne_item.ok else None,
+            "swCount": sw_item.value if sw_item and sw_item.ok else None,
+            "materialCode": material_item.value if material_item and material_item.ok else "",
+        },
+        "parameters": robot_items,
+        "groupedParameters": [],
+    }
+
+
+def _build_xiaozhou_station_placeholder(line_number: int, station_def: dict) -> dict:
+    from .xiaozhou_line_layout import station_label
+
+    label = station_label(line_number, station_def)
+    return {
+        "sourceCode": f"pending-{line_number}-{station_def['key']}",
+        "displayTitle": label,
+        "dashboardTemplate": "station_placeholder",
+        "status": "pending",
+        "offlineReason": "待接入数据源",
+        "updatedAt": timezone.localtime().isoformat(),
+        "machineStatus": {
+            "label": "待接入",
+            "indicator": "gray",
+            "borderColor": "gray",
+            "alarmActive": False,
+        },
+    }
+
+
+def _build_xiaozhou_line_realtime_monitor(
+    area,
+    data_source_ids: list[int] | None = None,
+    *,
+    device_ids: list[int] | None = None,
+) -> dict:
+    from .realtime_dashboard_services import REALTIME_LAYOUT_SYNTEC_CNC, REALTIME_LAYOUT_XIAOZHOU_LINE
+    from .xiaozhou_line_layout import (
+        infer_line_number_from_source,
+        line_station_template,
+        match_opcua_source_to_station,
+        match_s7_source_to_line_robot,
+        station_label,
+    )
+
+    qs = DataSourceConfig.objects.filter(is_enabled=True)
+    if data_source_ids:
+        qs = qs.filter(pk__in=data_source_ids)
+    else:
+        qs = qs.filter(devices__area=area, devices__is_active=True)
+    sources = list(qs.prefetch_related("devices").distinct().order_by("code"))
+
+    s7_sources = [s for s in sources if (s.source_type or "").strip() == "s7"]
+    opc_sources = [s for s in sources if (s.source_type or "").strip() == "opcua"]
+
+    line_numbers: set[int] = set()
+    for source in sources:
+        inferred = infer_line_number_from_source(source)
+        if inferred is not None:
+            line_numbers.add(inferred)
+
+    from .opcua_subscription_services import prewarm_opcua_data_sources
+
+    prewarm_opcua_data_sources([source.pk for source in opc_sources])
+
+    lines_out: list[dict] = []
+    consumed_opc_ids: set[int] = set()
+    for line_number in sorted(line_numbers):
+        stations_out: list[dict] = []
+        for station_def in line_station_template(line_number):
+            label = station_label(line_number, station_def)
+            card = None
+            if station_def["role"] == "robot":
+                robot_src = next(
+                    (s for s in s7_sources if match_s7_source_to_line_robot(s, line_number)),
+                    None,
+                )
+                if robot_src:
+                    card = _build_s7_robot_card_payload(robot_src, area, line_number)
+            else:
+                opc_src = next(
+                    (
+                        s
+                        for s in opc_sources
+                        if s.pk not in consumed_opc_ids
+                        and match_opcua_source_to_station(s, station_def, line_number, area)
+                    ),
+                    None,
+                )
+                if opc_src:
+                    consumed_opc_ids.add(opc_src.pk)
+                    card = _build_opcua_realtime_card_payload(
+                        opc_src,
+                        area,
+                        layout=REALTIME_LAYOUT_SYNTEC_CNC,
+                        preferred_device_ids=device_ids,
+                    )
+                    card["dashboardTemplate"] = "syntec_cnc_compact"
+
+            pending = card is None
+            if pending:
+                card = _build_xiaozhou_station_placeholder(line_number, station_def)
+
+            stations_out.append(
+                {
+                    "stationKey": station_def["key"],
+                    "role": station_def["role"],
+                    "label": label,
+                    "pending": pending,
+                    "card": card,
+                }
+            )
+
+        lines_out.append(
+            {
+                "lineNumber": line_number,
+                "lineLabel": f"{line_number}号线",
+                "stations": stations_out,
+            }
+        )
+
+    from django.conf import settings as django_settings
+
+    poll_sec = int(getattr(django_settings, "OPCUA_SCREEN_POLL_SECONDS", 2))
+    return {
+        "realtimeLayout": REALTIME_LAYOUT_XIAOZHOU_LINE,
+        "pollIntervalSeconds": poll_sec,
+        "lines": lines_out,
+        "cards": [],
+    }
+
+
+def _build_taotong_gunzi_station_placeholder(line_number: int, station_def: dict) -> dict:
+    from .taotong_gunzi_line_layout import taotong_lathe_label
+
+    if station_def.get("empty"):
+        return {
+            "sourceCode": f"empty-{line_number}-{station_def['stationKey']}",
+            "displayTitle": "",
+            "dashboardTemplate": "empty_slot",
+            "status": "empty",
+            "updatedAt": timezone.localtime().isoformat(),
+        }
+    label = station_def.get("label") or taotong_lathe_label(line_number, station_def["latheIndex"])
+    return {
+        "sourceCode": f"pending-{line_number}-{station_def['stationKey']}",
+        "displayTitle": label,
+        "dashboardTemplate": "station_placeholder",
+        "status": "pending",
+        "offlineReason": "待接入数据源",
+        "updatedAt": timezone.localtime().isoformat(),
+        "machineStatus": {
+            "label": "待接入",
+            "indicator": "gray",
+            "borderColor": "gray",
+            "alarmActive": False,
+        },
+    }
+
+
+def _build_taotong_gunzi_line_realtime_monitor(
+    area,
+    data_source_ids: list[int] | None = None,
+    *,
+    device_ids: list[int] | None = None,
+) -> dict:
+    from .realtime_dashboard_services import REALTIME_LAYOUT_SYNTEC_CNC, REALTIME_LAYOUT_TAOTONG_GUNZI_LINE
+    from .taotong_gunzi_line_layout import (
+        match_opcua_source_to_taotong_station,
+        taotong_line_grid_stations,
+        taotong_line_label,
+        taotong_line_numbers,
+    )
+
+    qs = DataSourceConfig.objects.filter(is_enabled=True, source_type="opcua")
+    if data_source_ids:
+        qs = qs.filter(pk__in=data_source_ids)
+    else:
+        qs = qs.filter(devices__area=area, devices__is_active=True)
+    opc_sources = list(qs.prefetch_related("devices").distinct().order_by("code"))
+
+    from .opcua_subscription_services import prewarm_opcua_data_sources
+
+    prewarm_opcua_data_sources([source.pk for source in opc_sources])
+
+    lines_out: list[dict] = []
+    consumed_opc_ids: set[int] = set()
+    for line_number in taotong_line_numbers():
+        stations_out: list[dict] = []
+        for station_def in taotong_line_grid_stations(line_number):
+            if station_def.get("empty"):
+                stations_out.append(
+                    {
+                        "stationKey": station_def["stationKey"],
+                        "column": station_def["column"],
+                        "label": "",
+                        "empty": True,
+                        "pending": False,
+                        "card": _build_taotong_gunzi_station_placeholder(line_number, station_def),
+                    }
+                )
+                continue
+
+            lathe_index = station_def["latheIndex"]
+            label = station_def["label"]
+            opc_src = next(
+                (
+                    s
+                    for s in opc_sources
+                    if s.pk not in consumed_opc_ids
+                    and match_opcua_source_to_taotong_station(s, line_number, lathe_index)
+                ),
+                None,
+            )
+            card = None
+            if opc_src:
+                consumed_opc_ids.add(opc_src.pk)
+                card = _build_opcua_realtime_card_payload(
+                    opc_src,
+                    area,
+                    layout=REALTIME_LAYOUT_SYNTEC_CNC,
+                    preferred_device_ids=device_ids,
+                )
+                card["dashboardTemplate"] = "syntec_cnc_compact"
+                card["displayTitle"] = label
+
+            pending = card is None
+            if pending:
+                card = _build_taotong_gunzi_station_placeholder(line_number, station_def)
+
+            stations_out.append(
+                {
+                    "stationKey": station_def["stationKey"],
+                    "column": station_def["column"],
+                    "label": label,
+                    "empty": False,
+                    "pending": pending,
+                    "card": card,
+                }
+            )
+
+        lines_out.append(
+            {
+                "lineNumber": line_number,
+                "lineLabel": taotong_line_label(line_number),
+                "stations": stations_out,
+            }
+        )
+
+    from django.conf import settings as django_settings
+
+    poll_sec = int(getattr(django_settings, "OPCUA_SCREEN_POLL_SECONDS", 2))
+    return {
+        "realtimeLayout": REALTIME_LAYOUT_TAOTONG_GUNZI_LINE,
+        "pollIntervalSeconds": poll_sec,
+        "lines": lines_out,
+        "cards": [],
+    }
+
+
 def _empty_cnc_payload_for_merge(reason: str) -> dict:
     base_ts = timezone.localtime().isoformat()
     dash = _build_cnc_dashboard_view({}, offline=True, device_model_fallback="")
@@ -1518,16 +2020,28 @@ def _empty_cnc_payload_for_merge(reason: str) -> dict:
         "updatedAt": base_ts,
         "parameters": [],
         "groupedParameters": [],
+        "dashboardTemplate": "siemens_boring",
         **dash,
     }
 
 
-def _merge_line_realtime_card(pl: ProductionLine, cnc_src: DataSourceConfig | None, robot_src: DataSourceConfig | None, area) -> dict:
+def _merge_line_realtime_card(
+    pl: ProductionLine,
+    cnc_src: DataSourceConfig | None,
+    robot_src: DataSourceConfig | None,
+    area,
+    *,
+    layout: str | None = None,
+) -> dict:
     """同一产线下镗床 + 机器人并排数据源合并为一张卡。"""
     line_devices = list(Device.objects.filter(production_line_id=pl.pk, area=area, is_active=True).order_by("code"))
-    cnc_dev = next((d for d in line_devices if "机器人" not in d.name), None)
+    cnc_dev = None
+    if cnc_src:
+        cnc_dev = cnc_src.devices.filter(area=area, is_active=True).order_by("code").first()
+    if cnc_dev is None:
+        cnc_dev = next((d for d in line_devices if "机器人" not in d.name), None)
     robot_dev = next((d for d in line_devices if "机器人" in d.name), None)
-    display_title = (cnc_dev.name if cnc_dev else None) or (robot_dev.name if robot_dev else pl.name)
+    line_fallback_title = (cnc_dev.name if cnc_dev else None) or (robot_dev.name if robot_dev else pl.name)
     sub_parts = []
     if cnc_src:
         sub_parts.append(cnc_src.name)
@@ -1536,7 +2050,9 @@ def _merge_line_realtime_card(pl: ProductionLine, cnc_src: DataSourceConfig | No
     subtitle = " · ".join(sub_parts)
 
     cnc_card = (
-        _build_opcua_realtime_card_payload(cnc_src, area) if cnc_src else _empty_cnc_payload_for_merge("未绑定镗床数据源")
+        _build_opcua_realtime_card_payload(cnc_src, area, layout=layout)
+        if cnc_src
+        else _empty_cnc_payload_for_merge("未绑定镗床数据源")
     )
     robot_panel = _build_robot_realtime_panel(robot_src, area)
 
@@ -1565,11 +2081,15 @@ def _merge_line_realtime_card(pl: ProductionLine, cnc_src: DataSourceConfig | No
     updated_candidates = [cnc_card.get("updatedAt", ""), robot_panel.get("updatedAt", "")]
     updated_at = max(updated_candidates) if updated_candidates else timezone.localtime().isoformat()
 
+    display_title = cnc_card.get("displayTitle") or line_fallback_title
+    subtitle = cnc_card.get("subtitle") or subtitle
+
     return {
         **{k: v for k, v in cnc_card.items() if k not in ("sourceCode", "sourceName", "mergeLayout")},
         "sourceCode": f"LINE-{pl.code}",
         "sourceName": pl.name,
         "mergeLayout": True,
+        "dashboardTemplate": cnc_card.get("dashboardTemplate") or "siemens_boring",
         "productionLineCode": pl.code,
         "displayTitle": display_title,
         "subtitle": subtitle,
@@ -1590,6 +2110,30 @@ def _page_binding_data_source_ids(screen_config: dict, page_key: str) -> list[in
         if binding.get("pageKey") == page_key:
             ids = binding.get("dataSourceIds") or []
             return [i for i in ids if isinstance(i, int) and i > 0]
+    return []
+
+
+def _page_binding_realtime_layout(screen_config: dict, page_key: str) -> str:
+    for binding in screen_config.get("pageBindings") or []:
+        if binding.get("pageKey") == page_key:
+            return (binding.get("realtimeLayout") or "").strip()
+    return ""
+
+
+def _page_binding_realtime_demo_mode(screen_config: dict, page_key: str) -> bool:
+    for binding in screen_config.get("pageBindings") or []:
+        if binding.get("pageKey") == page_key:
+            if "realtimeDemoMode" in binding:
+                return bool(binding.get("realtimeDemoMode"))
+            return True
+    return True
+
+
+def _page_binding_device_ids(screen_config: dict, page_key: str) -> list[int]:
+    for binding in screen_config.get("pageBindings") or []:
+        if binding.get("pageKey") == page_key:
+            raw = binding.get("deviceIds") or []
+            return [i for i in raw if isinstance(i, int) and i > 0]
     return []
 
 
@@ -1744,13 +2288,55 @@ def _empty_energy_data_page(reason: str) -> dict:
     }
 
 
-def _build_device_realtime_monitor(area, data_source_ids: list[int] | None = None) -> dict:
+def _build_device_realtime_monitor(
+    area,
+    data_source_ids: list[int] | None = None,
+    *,
+    realtime_layout: str | None = None,
+    device_ids: list[int] | None = None,
+    demo_mode: bool = True,
+) -> dict:
     """
     构建设备实时监控卡片列表。
 
     data_source_ids：若非空，只加载这些 ID 对应的 OPC UA 数据源（来自 ScreenPageBinding 配置）；
     为空或 None 时，回退到按区域关联设备自动发现所有启用的 OPC UA 数据源。
+    realtime_layout：ScreenPageBinding 指定的模板；影响产线合并策略与卡片结构。
+    demo_mode：展示模式；为 True 时不连接现场设备，返回全部在线的演示数据。
     """
+    from django.conf import settings as django_settings
+
+    from .realtime_dashboard_services import REALTIME_LAYOUT_TAOTONG_GUNZI_LINE, REALTIME_LAYOUT_XIAOZHOU_LINE, should_merge_production_line_cards
+    from .realtime_demo_services import (
+        build_generic_realtime_demo_monitor,
+        build_taotong_gunzi_line_demo_monitor,
+        build_xiaozhou_line_demo_monitor,
+    )
+
+    poll_sec = int(getattr(django_settings, "OPCUA_SCREEN_POLL_SECONDS", 2))
+    binding_layout = (realtime_layout or "").strip()
+
+    if demo_mode:
+        if binding_layout == REALTIME_LAYOUT_XIAOZHOU_LINE:
+            return build_xiaozhou_line_demo_monitor(poll_interval_seconds=poll_sec)
+        if binding_layout == REALTIME_LAYOUT_TAOTONG_GUNZI_LINE:
+            return build_taotong_gunzi_line_demo_monitor(poll_interval_seconds=poll_sec)
+        return build_generic_realtime_demo_monitor(layout=binding_layout, poll_interval_seconds=poll_sec)
+
+    if binding_layout == REALTIME_LAYOUT_XIAOZHOU_LINE:
+        return _build_xiaozhou_line_realtime_monitor(
+            area,
+            data_source_ids=data_source_ids,
+            device_ids=device_ids,
+        )
+
+    if binding_layout == REALTIME_LAYOUT_TAOTONG_GUNZI_LINE:
+        return _build_taotong_gunzi_line_realtime_monitor(
+            area,
+            data_source_ids=data_source_ids,
+            device_ids=device_ids,
+        )
+
     if data_source_ids:
         enabled_sources = (
             DataSourceConfig.objects.filter(
@@ -1769,14 +2355,17 @@ def _build_device_realtime_monitor(area, data_source_ids: list[int] | None = Non
             .distinct()
             .order_by("code")
         )
-    min_interval = None
-    for source in enabled_sources:
-        min_interval = source.refresh_interval_seconds if min_interval is None else min(min_interval, source.refresh_interval_seconds)
+    merge_lines = should_merge_production_line_cards(binding_layout, list(enabled_sources))
+    from .opcua_subscription_services import prewarm_opcua_data_sources
+
+    prewarm_opcua_data_sources([source.pk for source in enabled_sources])
 
     by_line: dict[int, dict[str, list[DataSourceConfig]]] = defaultdict(lambda: {"cnc": [], "robot": []})
     consumed: set[int] = set()
 
     for source in enabled_sources:
+        if not merge_lines:
+            continue
         pl = _production_line_for_source(source, area)
         kind = _classify_opcua_data_source(source)
         if pl is None:
@@ -1795,9 +2384,6 @@ def _build_device_realtime_monitor(area, data_source_ids: list[int] | None = Non
     standalone_sources = [s for s in enabled_sources if s.pk not in consumed]
 
     cards = []
-    futures = []
-
-    max_workers = min(max(len(merged_tasks) + len(standalone_sources), 1), 12)
 
     def _fail_card() -> dict:
         return {
@@ -1807,34 +2393,48 @@ def _build_device_realtime_monitor(area, data_source_ids: list[int] | None = Non
             "displayTitle": "未知设备",
             "subtitle": "",
             "mergeLayout": False,
+            "dashboardTemplate": binding_layout or "siemens_boring",
             "status": "offline",
             "offlineReason": "数据源读取异常",
             "updatedAt": timezone.localtime().isoformat(),
             "parameters": [],
             "groupedParameters": [],
-            **_build_cnc_dashboard_view(
+            **_build_realtime_dashboard_view(
+                binding_layout or "siemens_boring",
                 {},
                 offline=True,
                 device_model_fallback="",
             ),
         }
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        for pl, cnc_src, robot_src in merged_tasks:
-            futures.append(executor.submit(_merge_line_realtime_card, pl, cnc_src, robot_src, area))
-        for src in standalone_sources:
-            futures.append(executor.submit(_build_opcua_realtime_card_payload, src, area))
+    for pl, cnc_src, robot_src in merged_tasks:
+        try:
+            cards.append(_merge_line_realtime_card(pl, cnc_src, robot_src, area, layout=binding_layout))
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("realtime monitor card build failed: %s", exc)
+            cards.append(_fail_card())
 
-        for future in concurrent.futures.as_completed(futures):
-            try:
-                cards.append(future.result())
-            except Exception as exc:  # noqa: BLE001
-                logger.exception("realtime monitor card build failed: %s", exc)
-                cards.append(_fail_card())
+    for src in standalone_sources:
+        try:
+            cards.append(
+                _build_opcua_realtime_card_payload(
+                    src,
+                    area,
+                    layout=binding_layout,
+                    preferred_device_ids=device_ids,
+                )
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("realtime monitor card build failed: %s", exc)
+            cards.append(_fail_card())
 
     cards.sort(key=lambda item: item.get("sourceCode", ""))
+    from django.conf import settings as django_settings
+
+    poll_sec = int(getattr(django_settings, "OPCUA_SCREEN_POLL_SECONDS", 2))
     return {
-        "pollIntervalSeconds": int(min_interval or 30),
+        "realtimeLayout": binding_layout or None,
+        "pollIntervalSeconds": poll_sec,
         "cards": cards,
     }
 
@@ -1970,6 +2570,8 @@ def _test_data_source_connectivity(source: DataSourceConfig) -> bool:
         return test_opcua_connection(connection_config, node=source.node, history=history).ok
     if source_type in {"database", "energy_db", "schedule_db", "wms"}:
         return test_database_connection(connection_config).ok
+    if source_type == "s7":
+        return test_s7_connection(connection_config, node=source.node).ok
     # Other source types keep compatibility with existing "mock pass" policy.
     return True
 

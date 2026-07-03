@@ -557,6 +557,105 @@ class BackofficeApiTests(TestCase):
         )
         self.assertIn("节点读取结果", response.data["data"]["message"])
 
+    def test_s7_create_data_source_with_nodes(self):
+        response = self.client.post(
+            "/api/admin/data-source-configs",
+            {
+                "code": "s7-line5",
+                "name": "销轴5号线机器手",
+                "sourceType": "s7",
+                "connectionConfig": {
+                    "host": "192.168.31.2",
+                    "rack": 0,
+                    "slot": 1,
+                },
+                "node": [
+                    {
+                        "dbNumber": 79,
+                        "offset": 16,
+                        "bit": 0,
+                        "dataType": "bool",
+                        "comment": "5线运行",
+                    },
+                    {
+                        "dbNumber": 79,
+                        "offset": 18,
+                        "dataType": "int",
+                        "comment": "5线东北筐生产计数",
+                    },
+                ],
+                "refreshIntervalSeconds": 60,
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201, msg=response.data)
+        item = DataSourceConfig.objects.get(code="s7-line5")
+        self.assertEqual(item.source_type, "s7")
+        self.assertEqual(item.connection_config["host"], "192.168.31.2")
+        self.assertEqual(len(item.node), 2)
+
+    def test_s7_node_validation_rejects_invalid_bool(self):
+        response = self.client.post(
+            "/api/admin/data-source-configs",
+            {
+                "code": "s7-invalid",
+                "name": "无效S7",
+                "sourceType": "s7",
+                "connectionConfig": {"host": "192.168.31.2", "rack": 0, "slot": 1},
+                "node": [
+                    {
+                        "dbNumber": 79,
+                        "offset": 0,
+                        "dataType": "bool",
+                        "comment": "缺少 bit",
+                    }
+                ],
+                "refreshIntervalSeconds": 60,
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400)
+
+    @patch("backoffice.views.test_s7_connection")
+    def test_s7_test_connection_forwards_node_list(self, mock_test_s7_connection):
+        mock_test_s7_connection.return_value = ConnectionTestResult(
+            True,
+            "成功连接 S7 PLC 192.168.31.2 (rack=0, slot=1)，点位读取结果（按配置顺序）：\n1. 5线运行 = True",
+        )
+
+        response = self.client.post(
+            "/api/admin/data-source-configs/test-connection",
+            {
+                "sourceType": "s7",
+                "connectionConfig": {"host": "192.168.31.2", "rack": 0, "slot": 1},
+                "node": [
+                    {
+                        "dbNumber": 79,
+                        "offset": 16,
+                        "bit": 0,
+                        "dataType": "bool",
+                        "comment": "5线运行",
+                    }
+                ],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        mock_test_s7_connection.assert_called_once_with(
+            {"host": "192.168.31.2", "rack": 0, "slot": 1},
+            node=[
+                {
+                    "dbNumber": 79,
+                    "offset": 16,
+                    "bit": 0,
+                    "dataType": "bool",
+                    "comment": "5线运行",
+                }
+            ],
+        )
+        self.assertIn("点位读取结果", response.data["data"]["message"])
+
     def test_operation_logs_record_admin_actions(self):
         self.client.post("/api/admin/areas", {"code": "A02", "name": "测试区"}, format="json")
         response = self.client.get("/api/admin/operation-logs?page=1&pageSize=10")
@@ -1293,3 +1392,515 @@ class ScheduleGanttAnchorModeTests(TestCase):
         payload = get_screen_payload("right", area.code)
         schedule = payload["content"]["schedule"]
         self.assertIn(schedule["ganttAnchorMode"], ("earliest_order", "current_time"))
+
+
+class OpcUaSubscriptionTests(TestCase):
+    @patch("backoffice.connection_test_services._read_opcua_nodes_direct")
+    def test_read_opcua_nodes_uses_subscription_when_data_source_id_set(self, mock_direct):
+        from backoffice.connection_test_services import OpcUaNodeReadItem, OpcUaReadResult, read_opcua_nodes
+        from backoffice.opcua_subscription_services import OpcUaSubscriptionManager
+
+        cached = OpcUaReadResult(
+            ok=True,
+            offline=False,
+            message="订阅缓存读取",
+            endpoint="opc.tcp://127.0.0.1:4840",
+            source_info="test",
+            items=[OpcUaNodeReadItem(comment="状态", node_id="ns=2;i=1", ok=True, value="1")],
+        )
+        mgr = OpcUaSubscriptionManager()
+        mgr._started = True  # noqa: SLF001
+        mgr.read = lambda *args, **kwargs: cached  # type: ignore[method-assign]
+
+        with patch("backoffice.opcua_subscription_services.get_opcua_subscription_manager", return_value=mgr):
+            result = read_opcua_nodes(
+                {"endpointUrl": "opc.tcp://127.0.0.1:4840"},
+                node=[{"nodeId": "ns=2;i=1", "comment": "状态"}],
+                data_source_id=99,
+            )
+
+        self.assertTrue(result.ok)
+        mock_direct.assert_not_called()
+
+    @patch("backoffice.connection_test_services._read_opcua_nodes_direct")
+    def test_read_opcua_nodes_requires_data_source_id(self, mock_direct):
+        from backoffice.connection_test_services import read_opcua_nodes
+
+        result = read_opcua_nodes({"endpointUrl": "opc.tcp://127.0.0.1:4840"})
+        self.assertFalse(result.ok)
+        self.assertTrue(result.offline)
+        mock_direct.assert_not_called()
+
+    @override_settings(
+        OPCUA_MAX_MONITORED_ITEMS_PER_SUBSCRIPTION=2,
+        OPCUA_MAX_MONITORED_ITEMS_PER_ENDPOINT=4,
+    )
+    def test_endpoint_worker_deduplicates_and_caps_nodes(self):
+        from backoffice.opcua_subscription_services import _OpcUaEndpointWorker
+
+        worker = _OpcUaEndpointWorker(
+            "opc.tcp://127.0.0.1:4840|",
+            {"endpointUrl": "opc.tcp://127.0.0.1:4840"},
+        )
+        worker.register_source(
+            1,
+            {"endpointUrl": "opc.tcp://127.0.0.1:4840"},
+            [
+                {"nodeId": "ns=2;s=/a", "comment": "A", "subscribe": True},
+                {"nodeId": "ns=2;s=/b", "comment": "B", "subscribe": True},
+                {"nodeId": "ns=2;s=/c", "comment": "C", "subscribe": True},
+            ],
+        )
+        worker.register_source(
+            2,
+            {"endpointUrl": "opc.tcp://127.0.0.1:4840"},
+            [
+                {"nodeId": "ns=2;s=/b", "comment": "B-dup", "subscribe": True},
+                {"nodeId": "ns=2;s=/d", "comment": "D", "subscribe": True},
+            ],
+        )
+        nodes = worker._unique_node_items(subscribe_only=True)
+        self.assertEqual(len(nodes), 4)
+        node_ids = {item["nodeId"] for item in nodes}
+        self.assertEqual(node_ids, {"ns=2;s=/a", "ns=2;s=/b", "ns=2;s=/c", "ns=2;s=/d"})
+
+    def test_read_once_paths_default_without_subscribe(self):
+        from backoffice.connection_test_services import _normalize_opcua_nodes, split_opcua_nodes_by_subscribe
+
+        nodes = _normalize_opcua_nodes(
+            [
+                {"nodeId": "ns=2;s=/Nck/Configuration/nckVersion", "comment": "CNC型号"},
+                {"nodeId": "ns=2;s=/Channel/State/chanStatus", "comment": "运行状态"},
+            ],
+            {},
+        )
+        subscribe_items, read_once_items = split_opcua_nodes_by_subscribe(nodes)
+        self.assertEqual(len(subscribe_items), 1)
+        self.assertEqual(len(read_once_items), 1)
+        self.assertEqual(read_once_items[0]["nodeId"], "ns=2;s=/Nck/Configuration/nckVersion")
+
+    def test_syntec_read_once_paths_default_without_subscribe(self):
+        from backoffice.connection_test_services import _normalize_opcua_nodes, split_opcua_nodes_by_subscribe
+
+        nodes = _normalize_opcua_nodes(
+            [
+                {"nodeId": "ns=1;s=CNCInterface/CncChannelList0/CncChannel1/Id0", "comment": "轴群编号"},
+                {"nodeId": "ns=1;s=CNCInterface/CncChannelList0/CncChannel1/ActProgramStatus0", "comment": "状态"},
+            ],
+            {},
+        )
+        subscribe_items, read_once_items = split_opcua_nodes_by_subscribe(nodes)
+        self.assertEqual(len(subscribe_items), 1)
+        self.assertEqual(len(read_once_items), 1)
+        self.assertEqual(read_once_items[0]["nodeId"], "ns=1;s=CNCInterface/CncChannelList0/CncChannel1/Id0")
+
+    def test_normalize_s7_nodes_parses_db_points(self):
+        from backoffice.connection_test_services import _format_s7_address, _normalize_s7_nodes
+
+        nodes = _normalize_s7_nodes(
+            [
+                {"dbNumber": 79, "offset": 16, "bit": 0, "dataType": "bool", "comment": "5线运行"},
+                {"dbNumber": 79, "offset": 18, "dataType": "int", "comment": "5线东北筐生产计数"},
+                {
+                    "dbNumber": 79,
+                    "offset": 22,
+                    "length": 10,
+                    "dataType": "string",
+                    "comment": "5线物料编码",
+                },
+            ]
+        )
+        self.assertEqual(len(nodes), 3)
+        self.assertEqual(_format_s7_address(nodes[0]), "DB79.DBX16.0")
+        self.assertEqual(_format_s7_address(nodes[1]), "DB79.DBW18")
+        self.assertEqual(_format_s7_address(nodes[2]), "DB79.DBB22..31")
+
+    def test_s7_robot_seed_line5_matches_222md(self):
+        from backoffice.s7_robot_seed import XIAOZHOU_S7_ROBOT_LINES, build_s7_robot_line_nodes, s7_robot_line_seed_payload
+
+        line5 = next(item for item in XIAOZHOU_S7_ROBOT_LINES if item["line"] == 5)
+        nodes = build_s7_robot_line_nodes(5, line5["base_offset"])
+        self.assertEqual(
+            [(n["offset"], n.get("bit"), n.get("dataType")) for n in nodes],
+            [
+                (16, 0, "bool"),
+                (16, 1, "bool"),
+                (16, 2, "bool"),
+                (18, None, "int"),
+                (20, None, "int"),
+                (22, None, "string"),
+            ],
+        )
+        payload = s7_robot_line_seed_payload(line5)
+        self.assertEqual(payload["code"], "DS-S7-LINE5")
+        self.assertEqual(payload["connection_config"]["host"], "192.168.31.2")
+
+    def test_seed_xiaozhou_s7_robot_lines_command(self):
+        from django.core.management import call_command
+
+        area = Area.objects.create(code="XZ-S7", name="销轴自动生产线", is_active=True)
+        call_command(
+            "seed_xiaozhou_s7_robot_lines",
+            area_code="XZ-S7",
+            create_devices=True,
+            lines="1,5",
+        )
+        line1 = DataSourceConfig.objects.get(code="DS-S7-LINE1")
+        line5 = DataSourceConfig.objects.get(code="DS-S7-LINE5")
+        self.assertEqual(line1.source_type, "s7")
+        self.assertEqual(line1.connection_config["host"], "192.168.31.49")
+        self.assertEqual(line5.connection_config["host"], "192.168.31.2")
+        self.assertEqual(line1.devices.count(), 1)
+        self.assertEqual(line1.devices.first().code, "XZ-S7-ROBOT-1")
+        self.assertEqual(len(line5.node), 6)
+
+    @patch("backoffice.display_services.read_s7_nodes")
+    def test_xiaozhou_line_monitor_builds_robot_and_placeholders(self, mock_read_s7):
+        from backoffice.connection_test_services import ConnectionTestResult, S7NodeReadItem
+        from backoffice.display_services import _build_xiaozhou_line_realtime_monitor
+        from backoffice.realtime_dashboard_services import REALTIME_LAYOUT_XIAOZHOU_LINE
+
+        area = Area.objects.create(code="XZ-L5", name="销轴", is_active=True)
+        source = DataSourceConfig.objects.create(
+            code="DS-S7-LINE5",
+            name="销轴5号线机器手",
+            source_type="s7",
+            connection_config={"host": "192.168.31.2", "rack": 0, "slot": 1},
+            node=[],
+        )
+        mock_read_s7.return_value = (
+            ConnectionTestResult(True, "ok"),
+            [
+                S7NodeReadItem("5线运行", "DB79.DBX16.0", True, "True"),
+                S7NodeReadItem("5线停止", "DB79.DBX16.1", True, "False"),
+                S7NodeReadItem("5线故障", "DB79.DBX16.2", True, "False"),
+                S7NodeReadItem("5线东北筐生产计数", "DB79.DBW18", True, "12"),
+                S7NodeReadItem("5线西南筐生产计数", "DB79.DBW20", True, "34"),
+                S7NodeReadItem("5线物料编码", "DB79.DBB22..31", True, "MAT001"),
+            ],
+        )
+
+        payload = _build_xiaozhou_line_realtime_monitor(area, data_source_ids=[source.pk])
+        self.assertEqual(payload["realtimeLayout"], REALTIME_LAYOUT_XIAOZHOU_LINE)
+        self.assertEqual(len(payload["lines"]), 1)
+        stations = payload["lines"][0]["stations"]
+        self.assertEqual(len(stations), 7)
+        self.assertEqual(stations[0]["role"], "robot")
+        self.assertFalse(stations[0]["pending"])
+        self.assertEqual(stations[0]["card"]["dashboardTemplate"], "s7_robot")
+        self.assertEqual(stations[0]["card"]["s7Extras"]["neCount"], "12")
+        self.assertTrue(stations[1]["pending"])
+        self.assertEqual(stations[1]["label"], "车床5")
+
+    def test_xiaozhou_line_demo_mode_all_stations_online(self):
+        from backoffice.display_services import _build_device_realtime_monitor
+        from backoffice.realtime_dashboard_services import REALTIME_LAYOUT_XIAOZHOU_LINE
+
+        area = Area.objects.create(code="XZ-DEMO", name="销轴演示", is_active=True)
+        payload = _build_device_realtime_monitor(
+            area,
+            realtime_layout=REALTIME_LAYOUT_XIAOZHOU_LINE,
+            demo_mode=True,
+        )
+        self.assertTrue(payload.get("demoMode"))
+        self.assertEqual(len(payload["lines"]), 5)
+        line1 = next(line for line in payload["lines"] if line["lineNumber"] == 1)
+        self.assertEqual(len(line1["stations"]), 5)
+        line5 = next(line for line in payload["lines"] if line["lineNumber"] == 5)
+        self.assertEqual(len(line5["stations"]), 7)
+        for line in payload["lines"]:
+            for station in line["stations"]:
+                self.assertFalse(station["pending"])
+                self.assertEqual(station["card"]["status"], "online")
+                self.assertEqual(station["card"]["machineStatus"]["indicator"], "green")
+
+    def test_line1_station_template_excludes_lathe_4_and_5(self):
+        from backoffice.xiaozhou_line_layout import line_station_template
+
+        keys = [item["key"] for item in line_station_template(1)]
+        self.assertEqual(keys, ["robot", "lathe_3", "lathe_2", "lathe_1", "dual_spindle_1"])
+
+    def test_line5_station_template_includes_all_lathes(self):
+        from backoffice.xiaozhou_line_layout import line_station_template
+
+        keys = [item["key"] for item in line_station_template(5)]
+        self.assertEqual(
+            keys,
+            ["robot", "lathe_5", "lathe_4", "lathe_3", "lathe_2", "lathe_1", "dual_spindle_1"],
+        )
+
+    def test_opcua_station_match_requires_line_number(self):
+        from backoffice.models import Device
+        from backoffice.xiaozhou_line_layout import (
+            XIAOZHOU_LINE_STATION_TEMPLATE,
+            match_opcua_source_to_station,
+        )
+
+        area = Area.objects.create(code="XZ-M", name="销轴", is_active=True)
+        lathe5_def = next(s for s in XIAOZHOU_LINE_STATION_TEMPLATE if s["key"] == "lathe_5")
+        dev = Device.objects.create(code="LT5", name="销轴5号线车床5", area=area, is_active=True)
+        src = DataSourceConfig.objects.create(
+            code="DS-01005",
+            name="销轴5号线车床5",
+            source_type="opcua",
+            connection_config={"endpointUrl": "opc.tcp://127.0.0.1:4840"},
+            node=[],
+        )
+        src.devices.add(dev)
+
+        self.assertTrue(match_opcua_source_to_station(src, lathe5_def, 5, area))
+        self.assertFalse(match_opcua_source_to_station(src, lathe5_def, 1, area))
+
+    def test_explicit_subscribe_false(self):
+        from backoffice.connection_test_services import node_subscribe_enabled
+
+        self.assertFalse(
+            node_subscribe_enabled(
+                {
+                    "nodeId": "NS2|String|/Channel/Compensation/cuttEdgeParam",
+                    "comment": "刀补",
+                    "subscribe": False,
+                }
+            )
+        )
+
+
+class RealtimeDashboardTemplateTests(TestCase):
+    def test_detect_syntec_layout_from_ns1_nodes(self):
+        from backoffice.models import DataSourceConfig
+        from backoffice.realtime_dashboard_services import (
+            REALTIME_LAYOUT_SYNTEC_CNC,
+            detect_opcua_realtime_layout,
+        )
+
+        source = DataSourceConfig(
+            code="TEST_SYNTEC",
+            name="test",
+            source_type="opcua",
+            node=[
+                {
+                    "nodeId": "ns=1;s=CNCInterface/CncChannelList0/CncChannel1/ActProgramStatus0",
+                    "comment": "控制器状态",
+                }
+            ],
+        )
+        self.assertEqual(detect_opcua_realtime_layout(source), REALTIME_LAYOUT_SYNTEC_CNC)
+
+    def test_build_syntec_dashboard_maps_status_and_spindle(self):
+        from backoffice.realtime_dashboard_services import build_syntec_cnc_dashboard_view
+
+        vm = {
+            "CNCInterface/CncChannelList0/CncChannel1/ActProgramStatus0": (True, "1"),
+            "CNCInterface/CncChannelList0/CncChannel1/ActOperationMode0": (True, "AUTO"),
+            "CNCInterface/CncChannelList0/CncChannel1/FeedHold0": (True, "0"),
+            "CNCInterface/CncChannelList0/CncChannel1/ActProgramName0": (True, "O1234"),
+            "CNCInterface/CncChannelList0/CncChannel1/ActMainProgramLine0": (True, "N120"),
+            "CNCInterface/CncChannelList0/CncChannel1/TotalPartCount0": (True, "42"),
+            "CNCInterface/CncChannelList0/CncChannel1/ToolId0": (True, "5"),
+            "CNCInterface/CncSpindleList0/CncSpindle1/ActSpeed0": (True, "1500"),
+            "CNCInterface/CncSpindleList0/CncSpindle1/ActLoad0": (True, "55"),
+            "CNCInterface/CncSpindleList0/CncSpindle1/ActOverride0": (True, "100"),
+            "CNCInterface/PowerOnSpan0": (True, "3661"),
+        }
+        dash = build_syntec_cnc_dashboard_view(vm, offline=False)
+        self.assertEqual(dash["machineStatus"]["label"], "加工")
+        self.assertEqual(dash["job"]["mainProgram"], "O1234")
+        self.assertEqual(dash["spindles"][0]["actSpeedRpm"], 1500.0)
+        self.assertEqual(dash["syntecExtras"]["totalPartCount"], 42)
+        self.assertEqual(dash["syntecExtras"]["toolId"], 5)
+        self.assertEqual(dash["syntecExtras"]["currentAlarm"], "")
+
+    def test_syntec_alarm_status_without_reading_history_alarm_node(self):
+        from backoffice.realtime_dashboard_services import (
+            build_syntec_cnc_dashboard_view,
+            syntec_program_status_is_alarm,
+        )
+
+        self.assertTrue(syntec_program_status_is_alarm("3"))
+        vm = {
+            "CNCInterface/CncChannelList0/CncChannel1/ActProgramStatus0": (True, "3"),
+            "CNCInterface/CncChannelList0/CncChannel1/FeedHold0": (True, "0"),
+        }
+        dash = build_syntec_cnc_dashboard_view(vm, offline=False, alarm_text="E001 伺服报警")
+        self.assertEqual(dash["machineStatus"]["code"], "alarm")
+        self.assertEqual(dash["syntecExtras"]["currentAlarm"], "E001 伺服报警")
+
+    def test_current_alarm_node_is_on_demand_only(self):
+        from backoffice.connection_test_services import node_on_demand_only, split_opcua_nodes_by_subscribe
+
+        alarm_node = {
+            "nodeId": "ns=1;s=CNCInterface/CurrentAlarm0",
+            "comment": "历史报警列表",
+            "readWhen": "alarm",
+        }
+        self.assertTrue(node_on_demand_only(alarm_node))
+        subscribe_items, read_once_items = split_opcua_nodes_by_subscribe([alarm_node])
+        self.assertEqual(subscribe_items, [])
+        self.assertEqual(read_once_items, [])
+
+    def test_should_not_merge_lines_for_syntec_layout(self):
+        from backoffice.realtime_dashboard_services import should_merge_production_line_cards
+
+        self.assertFalse(should_merge_production_line_cards("syntec_cnc"))
+        self.assertTrue(should_merge_production_line_cards("siemens_boring"))
+        self.assertFalse(should_merge_production_line_cards(""))
+        self.assertFalse(should_merge_production_line_cards("", sources=[]))
+
+    def test_normalize_syntec_percent_scales_10000(self):
+        from backoffice.realtime_dashboard_services import _normalize_syntec_percent
+
+        self.assertEqual(_normalize_syntec_percent(10000), 100.0)
+        self.assertEqual(_normalize_syntec_percent(100), 100.0)
+
+
+class TaotongGunziDeviceSeedTests(TestCase):
+    def test_iter_taotong_gunzi_devices_maps_first_line_ips(self):
+        from backoffice.taotong_gunzi_device_seed import iter_taotong_gunzi_devices
+
+        devices = iter_taotong_gunzi_devices()
+        self.assertEqual(len(devices), 25)
+        line1 = [d for d in devices if d["line_code"] == "TTGZ-L01"]
+        self.assertEqual(len(line1), 3)
+        self.assertEqual(line1[0]["device_name"], "套筒滚子1号线车床1")
+        self.assertEqual(line1[0]["ip"], "192.168.31.65")
+        line9 = [d for d in devices if d["line_code"] == "TTGZ-L09"]
+        self.assertEqual(len(line9), 2)
+        self.assertEqual(line9[0]["device_name"], "套筒滚子9号线车床1")
+        self.assertEqual({d["area_code"] for d in devices}, {"TTGZ"})
+
+    def test_seed_taotong_gunzi_devices_command(self):
+        from django.core.management import call_command
+
+        call_command("seed_taotong_gunzi_devices")
+        from backoffice.models import Area, Device, ProductionLine
+
+        self.assertTrue(Area.objects.filter(code="TTGZ").exists())
+        self.assertFalse(Area.objects.filter(code="TTGZ-2F").exists())
+        self.assertEqual(ProductionLine.objects.filter(code__startswith="TTGZ-L").count(), 9)
+        self.assertEqual(Device.objects.filter(code__startswith="TTGZ-L").count(), 25)
+        self.assertFalse(Device.objects.filter(code__startswith="TTGZ-2F").exists())
+        self.assertTrue(
+            Device.objects.filter(name="套筒滚子1号线车床1", ip="192.168.31.65").exists()
+        )
+
+
+class TaotongGunziOpcuaSeedTests(TestCase):
+    def test_iter_taotong_gunzi_opcua_sources(self):
+        from backoffice.taotong_gunzi_opcua_seed import iter_taotong_gunzi_opcua_sources
+        from backoffice.realtime_dashboard_services import XIAOZHOU_SYNTEC_SCHEME_A_NODES
+
+        sources = iter_taotong_gunzi_opcua_sources()
+        self.assertEqual(len(sources), 25)
+        self.assertEqual(sources[0]["source_code"], "DS-02001")
+        self.assertEqual(sources[0]["source_name"], "套筒滚子1号线车床1")
+        self.assertEqual(sources[0]["endpoint_url"], "opc.tcp://192.168.31.65:4840")
+        self.assertEqual(sources[-1]["source_code"], "DS-02025")
+        self.assertEqual(sources[0]["node"], XIAOZHOU_SYNTEC_SCHEME_A_NODES)
+
+    def test_seed_taotong_gunzi_opcua_command(self):
+        from django.core.management import call_command
+
+        from backoffice.realtime_dashboard_services import XIAOZHOU_SYNTEC_SCHEME_A_NODES
+
+        call_command("seed_taotong_gunzi_devices")
+        call_command("seed_taotong_gunzi_opcua")
+        from backoffice.models import DataSourceConfig
+
+        src = DataSourceConfig.objects.get(code="DS-02001")
+        self.assertEqual(src.source_type, "opcua")
+        self.assertEqual(src.connection_config["endpointUrl"], "opc.tcp://192.168.31.65:4840")
+        self.assertEqual(len(src.node), len(XIAOZHOU_SYNTEC_SCHEME_A_NODES))
+        self.assertEqual(src.devices.first().code, "TTGZ-L01-LT01")
+        self.assertEqual(DataSourceConfig.objects.filter(code__startswith="DS-02").count(), 25)
+
+
+class TaotongGunziLineMonitorTests(TestCase):
+    def test_taotong_grid_stations_match_floor_plan(self):
+        from backoffice.taotong_gunzi_line_layout import taotong_line_grid_stations
+
+        line1 = taotong_line_grid_stations(1)
+        self.assertEqual([s["latheIndex"] for s in line1], [3, 2, 1])
+        line8 = taotong_line_grid_stations(8)
+        self.assertEqual([s.get("latheIndex") for s in line8], [None, 2, 1])
+
+    def test_taotong_line_demo_monitor_nine_rows(self):
+        from backoffice.display_services import _build_device_realtime_monitor
+        from backoffice.realtime_dashboard_services import REALTIME_LAYOUT_TAOTONG_GUNZI_LINE
+
+        area = Area.objects.create(code="TTGZ-T", name="套筒滚子", is_active=True)
+        payload = _build_device_realtime_monitor(
+            area,
+            realtime_layout=REALTIME_LAYOUT_TAOTONG_GUNZI_LINE,
+            demo_mode=True,
+        )
+        self.assertEqual(payload["realtimeLayout"], REALTIME_LAYOUT_TAOTONG_GUNZI_LINE)
+        self.assertEqual(len(payload["lines"]), 9)
+        self.assertEqual(len(payload["lines"][0]["stations"]), 3)
+        self.assertTrue(payload["lines"][7]["stations"][0]["empty"])
+        self.assertFalse(payload["lines"][0]["stations"][2]["pending"])
+
+    @patch("backoffice.display_services.read_opcua_nodes")
+    def test_taotong_line_monitor_matches_ds_sources(self, mock_read):
+        from django.core.management import call_command
+
+        from backoffice.display_services import _build_taotong_gunzi_line_realtime_monitor
+        from backoffice.realtime_dashboard_services import REALTIME_LAYOUT_TAOTONG_GUNZI_LINE, XIAOZHOU_SYNTEC_SCHEME_A_NODES
+
+        area = Area.objects.create(code="TTGZ-M", name="套筒滚子", is_active=True)
+        call_command("seed_taotong_gunzi_devices")
+        device = Device.objects.get(code="TTGZ-L01-LT01")
+        source = DataSourceConfig.objects.create(
+            code="DS-02001",
+            name="套筒滚子1号线车床1",
+            source_type="opcua",
+            is_enabled=True,
+            connection_config={"endpointUrl": "opc.tcp://192.168.31.65:4840"},
+            node=XIAOZHOU_SYNTEC_SCHEME_A_NODES,
+        )
+        source.devices.add(device)
+        mock_read.return_value = OpcUaReadResult(
+            ok=True,
+            offline=False,
+            message="ok",
+            endpoint="opc.tcp://192.168.31.65:4840",
+            source_info="",
+            items=[
+                OpcUaNodeReadItem(
+                    comment="主轴转速",
+                    node_id="ns=1;s=CNCInterface/CncSpindleList0/CncSpindle1/ActSpeed0",
+                    ok=True,
+                    value="3000",
+                    error="",
+                )
+            ],
+        )
+
+        payload = _build_taotong_gunzi_line_realtime_monitor(area, data_source_ids=[source.pk])
+        self.assertEqual(payload["realtimeLayout"], REALTIME_LAYOUT_TAOTONG_GUNZI_LINE)
+        line1 = payload["lines"][0]
+        self.assertEqual(line1["lineLabel"], "套筒滚子1号线")
+        right_station = line1["stations"][2]
+        self.assertFalse(right_station["pending"])
+        self.assertEqual(right_station["label"], "套筒滚子1号线车床1")
+
+
+class RealtimeCardDisplayTitleTests(TestCase):
+    def test_card_title_uses_data_source_name_not_other_device(self):
+        from backoffice.display_services import _resolve_opc_card_display
+        from backoffice.models import Area, DataSourceConfig, Device
+
+        area = Area.objects.create(code="XZ5", name="销轴5号线", is_active=True)
+        source = DataSourceConfig.objects.create(
+            code="OPC_LATHE",
+            name="销轴5号线车床1",
+            source_type="opcua",
+            is_enabled=True,
+        )
+        spindle = Device.objects.create(code="XZ5-SP", name="销轴5号线双主轴1", area=area, is_active=True)
+        lathe = Device.objects.create(code="XZ5-LT", name="销轴5号线车床1", area=area, is_active=True)
+        source.devices.add(spindle, lathe)
+
+        title, subtitle, primary = _resolve_opc_card_display(source, area)
+        self.assertEqual(title, "销轴5号线车床1")
+        self.assertEqual(subtitle, "")
+        self.assertEqual(primary.pk, lathe.pk)

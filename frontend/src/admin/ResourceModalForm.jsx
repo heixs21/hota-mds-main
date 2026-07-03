@@ -6,6 +6,7 @@ import { ResourceField } from "./ResourceField.jsx";
 export function ResourceModalForm({
   resourceDefinition,
   initialItem,
+  initialFormState,
   relatedOptions,
   onCancel,
   onSubmit,
@@ -13,11 +14,15 @@ export function ResourceModalForm({
   isSaving,
   isTesting,
 }) {
-  const [formState, setFormState] = useState(() =>
-    initialItem ? createFormFromItem(resourceDefinition, initialItem) : createEmptyForm(resourceDefinition),
-  );
+  const [formState, setFormState] = useState(() => {
+    if (initialFormState) {
+      return initialFormState;
+    }
+    return initialItem ? createFormFromItem(resourceDefinition, initialItem) : createEmptyForm(resourceDefinition);
+  });
 
   const isEdit = Boolean(initialItem?.id);
+  const isCopy = Boolean(initialFormState && !isEdit);
   const supportsTest = Boolean(resourceDefinition.supportsTestConnection);
 
   function handleSubmit(event) {
@@ -41,11 +46,13 @@ export function ResourceModalForm({
         className={`modal-dialog${resourceDefinition.wideModal ? " modal-dialog--wide" : ""}`}
         role="dialog"
         aria-modal="true"
-        aria-label={`${isEdit ? "编辑" : "新建"}${resourceDefinition.itemLabel}`}
+        aria-label={`${isEdit ? "编辑" : isCopy ? "复制新增" : "新建"}${resourceDefinition.itemLabel}`}
       >
         <form className="modal-form" onSubmit={handleSubmit}>
           <div className="modal-header">
-            <h3>{isEdit ? `编辑${resourceDefinition.itemLabel}` : `新建${resourceDefinition.itemLabel}`}</h3>
+            <h3>
+              {isEdit ? `编辑${resourceDefinition.itemLabel}` : isCopy ? `复制新增${resourceDefinition.itemLabel}` : `新建${resourceDefinition.itemLabel}`}
+            </h3>
             <button aria-label="关闭" className="modal-close" disabled={isSaving || isTesting} onClick={onCancel} type="button">
               ×
             </button>

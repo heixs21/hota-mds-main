@@ -98,6 +98,24 @@ ENERGY_DASHBOARD_ALLOW_LIVE_FALLBACK = os.getenv(
     "ENERGY_DASHBOARD_ALLOW_LIVE_FALLBACK", "true"
 ).lower() in ("1", "true", "yes")
 
+# OPC UA 订阅制（大屏读缓存；管理端测试连接仍一次性直连）
+# 发布间隔：OPC 服务器向客户端推送 DataChange 的批次间隔（非大屏轮询、非数据源 refresh_interval）
+OPCUA_SUBSCRIPTION_PUBLISHING_MS = int(os.getenv("OPCUA_SUBSCRIPTION_PUBLISHING_MS", "500"))
+OPCUA_SUBSCRIPTION_RECONNECT_SECONDS = int(os.getenv("OPCUA_SUBSCRIPTION_RECONNECT_SECONDS", "2"))
+OPCUA_SUBSCRIPTION_RECONCILE_SECONDS = int(os.getenv("OPCUA_SUBSCRIPTION_RECONCILE_SECONDS", "30"))
+OPCUA_SUBSCRIPTION_CLIENT_TIMEOUT_SECONDS = int(os.getenv("OPCUA_SUBSCRIPTION_CLIENT_TIMEOUT_SECONDS", "5"))
+OPCUA_SUBSCRIPTION_OFFLINE_RETRY_SECONDS = float(os.getenv("OPCUA_SUBSCRIPTION_OFFLINE_RETRY_SECONDS", "2"))
+# 大屏 HTTP 拉取实时监控 API 的间隔（读订阅缓存，不是 OPC 订阅读点周期）
+OPCUA_SCREEN_POLL_SECONDS = int(os.getenv("OPCUA_SCREEN_POLL_SECONDS", "2"))
+# 单 Subscription 内 MonitoredItem 上限（遇 BadTooManyMonitoredItems 可调小）
+OPCUA_MAX_MONITORED_ITEMS_PER_SUBSCRIPTION = int(
+    os.getenv("OPCUA_MAX_MONITORED_ITEMS_PER_SUBSCRIPTION", "32")
+)
+# 同一 OPC UA endpoint 跨数据源合并后的 MonitoredItem 总上限
+OPCUA_MAX_MONITORED_ITEMS_PER_ENDPOINT = int(
+    os.getenv("OPCUA_MAX_MONITORED_ITEMS_PER_ENDPOINT", "96")
+)
+
 REST_FRAMEWORK = {
     "DEFAULT_RENDERER_CLASSES": [
         "rest_framework.renderers.JSONRenderer",

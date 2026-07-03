@@ -33,6 +33,7 @@ CONNECTION_CONFIG_ALLOWED_KEYS = {
     "schedule_db": {"engine", "host", "port", "database", "username", "password"},
     "wms": {"engine", "host", "port", "database", "username", "password"},
     "modbus_tcp": set(),
+    "s7": {"host", "rack", "slot"},
     "sap_rfc": set(),
     "repair": set(),
 }
@@ -358,8 +359,25 @@ class DataSourceConfigSerializer(CamelCaseModelSerializer):
                         raise serializers.ValidationError("node object must include non-empty nodeId")
                     if not isinstance(comment, str) or not comment.strip():
                         raise serializers.ValidationError("node object must include non-empty comment")
+                    if "subscribe" in item:
+                        from .connection_test_services import _coerce_subscribe_flag
+
+                        if _coerce_subscribe_flag(item.get("subscribe")) is None:
+                            raise serializers.ValidationError(
+                                "node subscribe must be boolean or one of: true/false, once/read_once, static"
+                            )
                     continue
                 raise serializers.ValidationError("node items must be string or object")
+
+        if source_type == "s7" and node not in ({}, [], None):
+            from .connection_test_services import S7_DATA_TYPES, _normalize_s7_nodes
+
+            if not isinstance(node, list):
+                raise serializers.ValidationError("node must be a list for s7 source")
+            try:
+                _normalize_s7_nodes(node)
+            except ValueError as exc:
+                raise serializers.ValidationError(str(exc)) from exc
 
         probe_instance = instance or DataSourceConfig()
         for attr, value in attrs.items():
@@ -522,6 +540,11 @@ class ScreenPageBindingSerializer(CamelCaseModelSerializer):
         required=False,
         allow_empty=True,
     )
+    device_ids = serializers.ListField(
+        child=serializers.IntegerField(min_value=1),
+        required=False,
+        allow_empty=True,
+    )
 
     def get_page_key_label(self, obj):
         return PAGE_KEY_LABELS.get(obj.page_key, obj.page_key)
@@ -545,11 +568,21 @@ class ScreenPageBindingSerializer(CamelCaseModelSerializer):
             "binding_source_type",
             "data_source_ids",
             "energy_equipment_ids",
+            "device_ids",
+            "realtime_layout",
+            "realtime_demo_mode",
             "is_enabled",
             "notes",
             "created_at",
             "updated_at",
         ] + RESERVED_FIELDS
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        if instance.page_key != "realtime":
+            data["realtimeLayout"] = None
+            data["realtimeDemoMode"] = None
+        return data
 
     def validate(self, attrs):
         attrs = super().validate(attrs)
@@ -573,6 +606,10 @@ class ScreenPageBindingSerializer(CamelCaseModelSerializer):
                 raise serializers.ValidationError(
                     "该区域（或未指定区域）下，同一屏幕与子页面的绑定已存在。"
                 )
+        page_key = attrs.get("page_key", getattr(instance, "page_key", None))
+        if page_key != "realtime":
+            attrs.pop("realtime_demo_mode", None)
+            attrs.pop("realtime_layout", None)
         return attrs
 
 

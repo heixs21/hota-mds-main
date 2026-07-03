@@ -101,7 +101,7 @@ export function ResourceTable({
                         )}
                       </div>
                     ) : (
-                      formatCellValue(item[column.key], column)
+                      formatCellValue(item[column.key], column, item)
                     )}
                   </td>
                 ))}

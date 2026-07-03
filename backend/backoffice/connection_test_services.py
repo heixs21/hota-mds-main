@@ -22,10 +22,11 @@ logger = logging.getLogger(__name__)
 
 
 TCP_PROBE_TIMEOUT_SECONDS = 5
+OPCUA_TCP_PROBE_TIMEOUT_SECONDS = 3
 DB_CONNECT_TIMEOUT_SECONDS = 15
 DB_READ_TIMEOUT_SECONDS = 15
 OPCUA_DEFAULT_PORT = 4840
-OPCUA_TIMEOUT_SECONDS = 8
+OPCUA_TIMEOUT_SECONDS = 5
 
 
 def _looks_like_handshake_failure(message: str) -> bool:
@@ -93,19 +94,20 @@ def _coerce_int(value, default: Optional[int] = None) -> Optional[int]:
         return default
 
 
-def _tcp_probe(host: str, port: int) -> Optional[str]:
+def _tcp_probe(host: str, port: int, *, timeout: float | None = None) -> Optional[str]:
     """Quickly check that the host/port is reachable.
 
     Returns ``None`` on success, or a human-readable error string on failure.
     """
+    probe_timeout = TCP_PROBE_TIMEOUT_SECONDS if timeout is None else timeout
 
     try:
-        with socket.create_connection((host, port), timeout=TCP_PROBE_TIMEOUT_SECONDS):
+        with socket.create_connection((host, port), timeout=probe_timeout):
             return None
     except socket.gaierror as exc:
         return f"无法解析主机 {host}: {exc}"
     except (socket.timeout, TimeoutError):
-        return f"连接 {host}:{port} 超时（{TCP_PROBE_TIMEOUT_SECONDS}s）"
+        return f"连接 {host}:{port} 超时（{probe_timeout}s）"
     except OSError as exc:
         return f"连接 {host}:{port} 失败: {exc}"
 
@@ -350,6 +352,113 @@ def _parse_opcua_endpoint(endpoint_url: str) -> tuple[str, int]:
     return host, port
 
 
+def _opc_node_path_key(node_id: str) -> str:
+    """从 nodeId 提取路径键，兼容 ns=2;s= 与 NS2|String| 等格式。"""
+    nid = (node_id or "").strip()
+    if not nid:
+        return ""
+    lower = nid.lower()
+    if lower.startswith("ns=2;s="):
+        return nid[7:]
+    if lower.startswith("ns=1;s="):
+        return nid[7:]
+    if "|" in nid:
+        parts = nid.split("|")
+        if len(parts) >= 3:
+            return parts[-1]
+    return nid
+
+
+# 机床静态信息：连接时读一次即可，不占 MonitoredItem 配额（可被节点 subscribe:false 覆盖）
+_OPCUA_READ_ONCE_PATHS = frozenset(
+    {
+        # 西门子 / 通用
+        "/Nck/Configuration/nckVersion",
+        "/Nck/Configuration/nckType",
+        "/Nck/State/hwProductSerialNr[1]",
+        "/Nck/Configuration/maxnumGlobMachAxes",
+        "/Nck/Configuration/numGlobMachAxes",
+        "/Channel/Configuration/numSpindles[u1, 1]",
+        "/Channel/LogicalSpindle/acSmaxVelo[u1, 1]",
+        "/Channel/Drive/AXCONF_CHANAX_NAME_TAB[1]",
+        # 新代 CNCInterface（NS1）
+        "CNCInterface/CncChannelList0/CncChannel1/Id0",
+        "CNCInterface/CncSpindleList0/CncSpindle1/IsInactive0",
+        "CNCInterface/CncSpindleList0/CncSpindle1/IsVirtual0",
+        "CNCInterface/CncSpindleList0/CncSpindle1/ActChannel0",
+        "CNCInterface/PowerOnSpan0",
+    }
+)
+
+
+def _coerce_subscribe_flag(value) -> bool | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        token = value.strip().lower()
+        if token in ("1", "true", "yes", "subscribe", "sub"):
+            return True
+        if token in ("0", "false", "no", "once", "read_once", "static"):
+            return False
+    return None
+
+
+def node_on_demand_only(node_item: dict) -> bool:
+    """按需读取节点：不参与订阅/连接预读（如历史报警列表）。"""
+    read_when = (node_item.get("readWhen") or node_item.get("read_when") or "").strip().lower()
+    if read_when in {"alarm", "on_alarm", "alarm_only"}:
+        return True
+    subscribe_raw = node_item.get("subscribe")
+    if isinstance(subscribe_raw, str):
+        token = subscribe_raw.strip().lower()
+        if token in {"on_alarm", "alarm", "alarm_only"}:
+            return True
+    path_key = _opc_node_path_key(node_item.get("nodeId") or "")
+    return path_key in _OPCUA_ON_DEMAND_PATHS
+
+
+# 历史报警等：仅报警态下直连读取，不占 MonitoredItem、连接时不预读
+_OPCUA_ON_DEMAND_PATHS = frozenset(
+    {
+        "CNCInterface/CurrentAlarm0",
+    }
+)
+
+
+def nodes_for_opcua_connection(node_items: list[dict]) -> list[dict]:
+    return [item for item in node_items if not node_on_demand_only(item)]
+
+
+def node_subscribe_enabled(node_item: dict) -> bool:
+    """是否对该节点建立 MonitoredItem 订阅；False 表示连接时读一次并缓存。"""
+    if node_on_demand_only(node_item):
+        return False
+    explicit = _coerce_subscribe_flag(node_item.get("subscribe"))
+    if explicit is not None:
+        return explicit
+    path_key = _opc_node_path_key(node_item.get("nodeId") or "")
+    if path_key in _OPCUA_READ_ONCE_PATHS:
+        return False
+    return True
+
+
+def split_opcua_nodes_by_subscribe(node_items: list[dict]) -> tuple[list[dict], list[dict]]:
+    subscribe_items: list[dict] = []
+    read_once_items: list[dict] = []
+    for item in node_items:
+        if node_on_demand_only(item):
+            continue
+        if node_subscribe_enabled(item):
+            subscribe_items.append(item)
+        else:
+            read_once_items.append(item)
+    return subscribe_items, read_once_items
+
+
 def _normalize_opcua_nodes(node, connection_config: dict) -> list[dict]:
     if isinstance(node, list):
         cleaned = []
@@ -358,20 +467,67 @@ def _normalize_opcua_nodes(node, connection_config: dict) -> list[dict]:
                 node_id = (item.get("nodeId") or "").strip() if isinstance(item.get("nodeId"), str) else ""
                 comment = (item.get("comment") or "").strip() if isinstance(item.get("comment"), str) else ""
                 if node_id and comment:
-                    cleaned.append({"nodeId": node_id, "comment": comment})
+                    entry = {"nodeId": node_id, "comment": comment}
+                    read_when = (item.get("readWhen") or item.get("read_when") or "").strip().lower()
+                    subscribe_raw = item.get("subscribe")
+                    if isinstance(subscribe_raw, str) and subscribe_raw.strip().lower() in {
+                        "on_alarm",
+                        "alarm",
+                        "alarm_only",
+                    }:
+                        read_when = read_when or "alarm"
+                    if read_when:
+                        entry["readWhen"] = read_when
+                    if "subscribe" in item:
+                        entry["subscribe"] = node_subscribe_enabled({**entry, "subscribe": item.get("subscribe")})
+                    else:
+                        entry["subscribe"] = node_subscribe_enabled(entry)
+                    cleaned.append(entry)
                     continue
             if isinstance(item, str):
                 node_id = item.strip()
                 if node_id:
-                    cleaned.append({"nodeId": node_id, "comment": f"未命名节点{index}"})
+                    entry = {"nodeId": node_id, "comment": f"未命名节点{index}"}
+                    entry["subscribe"] = node_subscribe_enabled(entry)
+                    cleaned.append(entry)
         if cleaned:
             return cleaned
     fallback_node = (connection_config.get("nodeId") or "").strip()
-    return [{"nodeId": fallback_node, "comment": "未命名节点1"}] if fallback_node else []
+    if fallback_node:
+        entry = {"nodeId": fallback_node, "comment": "未命名节点1"}
+        entry["subscribe"] = node_subscribe_enabled(entry)
+        return [entry]
+    return []
 
 
-def read_opcua_nodes(connection_config: dict, node=None, *, history=None) -> OpcUaReadResult:
-    """读取 OPC UA 节点；若传入 ``history``（OpcUaHistoryWriteContext），读结束后写入历史表。"""
+def read_opcua_nodes(
+    connection_config: dict,
+    node=None,
+    *,
+    history=None,
+    data_source_id: int | None = None,
+) -> OpcUaReadResult:
+    """从 OPC UA 订阅缓存读取节点（须传 data_source_id）。管理端测试连接请用 test_opcua_connection。"""
+    if not data_source_id:
+        return OpcUaReadResult(
+            ok=False,
+            offline=True,
+            message="缺少 data_source_id，无法读取 OPC UA 订阅缓存",
+            endpoint=(connection_config.get("endpointUrl") or ""),
+            source_info="",
+            items=[],
+        )
+
+    from .opcua_subscription_services import get_opcua_subscription_manager
+
+    mgr = get_opcua_subscription_manager()
+    if not mgr._started:  # noqa: SLF001
+        mgr.start()
+    return mgr.read(int(data_source_id), connection_config, node, history=history)
+
+
+def _read_opcua_nodes_direct(connection_config: dict, node=None, *, history=None) -> OpcUaReadResult:
+    """管理端「测试连接」专用：一次性直连读点（非订阅）。"""
     t0 = time.perf_counter()
 
     def finish(result: OpcUaReadResult) -> OpcUaReadResult:
@@ -536,8 +692,8 @@ def read_opcua_nodes(connection_config: dict, node=None, *, history=None) -> Opc
 
 
 def test_opcua_connection(connection_config: dict, node=None, *, history=None) -> ConnectionTestResult:
-    """Connect to OPC UA and verify configured nodes in order."""
-    result = read_opcua_nodes(connection_config, node=node, history=history)
+    """Connect to OPC UA and verify configured nodes in order (direct read, not subscription cache)."""
+    result = _read_opcua_nodes_direct(connection_config, node=node, history=history)
     if not result.items:
         return ConnectionTestResult(result.ok, result.message)
 
@@ -568,3 +724,255 @@ def _describe_exception(exc: BaseException) -> str:
     if rep in ("", f"{cls}()", f"{cls}('')"):
         return cls
     return f"{cls}: {rep}"
+
+
+S7_DATA_TYPES = {"bool", "int", "dint", "real", "string"}
+S7_TYPE_SIZES = {
+    "bool": 1,
+    "int": 2,
+    "dint": 4,
+    "real": 4,
+}
+
+
+def _coerce_int(value, *, field: str, default=None, min_value=None):
+    if value is None or value == "":
+        if default is not None:
+            return default
+        raise ValueError(f"{field} is required")
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field} must be an integer") from exc
+    if min_value is not None and parsed < min_value:
+        raise ValueError(f"{field} must be >= {min_value}")
+    return parsed
+
+
+def _normalize_s7_nodes(node) -> list[dict]:
+    if node in (None, {}, []):
+        return []
+    if not isinstance(node, list):
+        raise ValueError("node must be a list for s7 source")
+
+    normalized: list[dict] = []
+    for index, item in enumerate(node, start=1):
+        if not isinstance(item, dict):
+            raise ValueError(f"node item #{index} must be an object")
+        comment = item.get("comment")
+        if not isinstance(comment, str) or not comment.strip():
+            raise ValueError(f"node item #{index} must include non-empty comment")
+
+        db_number = _coerce_int(item.get("dbNumber"), field=f"node item #{index} dbNumber", min_value=1)
+        offset = _coerce_int(item.get("offset"), field=f"node item #{index} offset", min_value=0)
+        data_type = (item.get("dataType") or "").strip().lower()
+        if data_type not in S7_DATA_TYPES:
+            raise ValueError(
+                f"node item #{index} dataType must be one of: {', '.join(sorted(S7_DATA_TYPES))}"
+            )
+
+        bit = None
+        length = None
+        if data_type == "bool":
+            bit = _coerce_int(item.get("bit"), field=f"node item #{index} bit", min_value=0)
+            if bit > 7:
+                raise ValueError(f"node item #{index} bit must be between 0 and 7")
+        elif data_type == "string":
+            length = _coerce_int(item.get("length"), field=f"node item #{index} length", min_value=1)
+
+        normalized.append(
+            {
+                "comment": comment.strip(),
+                "db_number": db_number,
+                "offset": offset,
+                "data_type": data_type,
+                "bit": bit,
+                "length": length,
+            }
+        )
+    return normalized
+
+
+def _s7_point_size(point: dict) -> int:
+    data_type = point["data_type"]
+    if data_type == "string":
+        return point["length"]
+    return S7_TYPE_SIZES.get(data_type, 1)
+
+
+def _s7_db_read_ranges(nodes: list[dict]) -> dict[int, tuple[int, int]]:
+    ranges: dict[int, tuple[int, int]] = {}
+    for point in nodes:
+        db_number = point["db_number"]
+        start = point["offset"]
+        end = start + _s7_point_size(point)
+        if db_number not in ranges:
+            ranges[db_number] = (start, end)
+            continue
+        prev_start, prev_end = ranges[db_number]
+        ranges[db_number] = (min(prev_start, start), max(prev_end, end))
+    return ranges
+
+
+def _decode_s7_string(raw: bytes) -> str:
+    chars = []
+    for byte in raw:
+        if byte == 0:
+            break
+        chars.append(chr(byte))
+    return "".join(chars)
+
+
+def _parse_s7_value(data: bytes, point: dict):
+    data_type = point["data_type"]
+    offset = point["offset"] - point["_read_start"]
+    if data_type == "bool":
+        from snap7.util import get_bool
+
+        return get_bool(data, offset, point["bit"])
+    if data_type == "int":
+        from snap7.util import get_int
+
+        return get_int(data, offset)
+    if data_type == "dint":
+        from snap7.util import get_dint
+
+        return get_dint(data, offset)
+    if data_type == "real":
+        from snap7.util import get_real
+
+        return get_real(data, offset)
+    if data_type == "string":
+        return _decode_s7_string(data[offset : offset + point["length"]])
+    raise ValueError(f"unsupported data type: {data_type}")
+
+
+@dataclass
+class S7NodeReadItem:
+    comment: str
+    address: str
+    ok: bool
+    value: str
+    error: str = ""
+
+
+def _format_s7_address(point: dict) -> str:
+    db_number = point["db_number"]
+    offset = point["offset"]
+    data_type = point["data_type"]
+    if data_type == "bool":
+        return f"DB{db_number}.DBX{offset}.{point['bit']}"
+    if data_type == "int":
+        return f"DB{db_number}.DBW{offset}"
+    if data_type in {"dint", "real"}:
+        return f"DB{db_number}.DBD{offset}"
+    return f"DB{db_number}.DBB{offset}..{offset + point['length'] - 1}"
+
+
+def _read_s7_nodes(connection_config: dict, node=None) -> tuple[ConnectionTestResult, list[S7NodeReadItem]]:
+    host = (connection_config.get("host") or "").strip()
+    if not host:
+        return ConnectionTestResult(False, "PLC 主机地址不能为空"), []
+
+    try:
+        rack = _coerce_int(connection_config.get("rack"), field="rack", default=0, min_value=0)
+        slot = _coerce_int(connection_config.get("slot"), field="slot", default=1, min_value=0)
+    except ValueError as exc:
+        return ConnectionTestResult(False, str(exc)), []
+
+    nodes = _normalize_s7_nodes(node)
+    try:
+        import snap7
+    except ImportError:
+        return (
+            ConnectionTestResult(
+                False,
+                "未安装 python-snap7，请在 backend/requirements.txt 中安装依赖后重试",
+            ),
+            [],
+        )
+
+    client = snap7.client.Client()
+    items: list[S7NodeReadItem] = []
+    try:
+        client.connect(host, rack, slot)
+        if not client.get_connected():
+            return ConnectionTestResult(False, f"S7 PLC 连接失败: {host} (rack={rack}, slot={slot})"), []
+
+        if not nodes:
+            return ConnectionTestResult(True, f"成功连接 S7 PLC {host} (rack={rack}, slot={slot})"), []
+
+        db_blocks: dict[int, bytes] = {}
+        for db_number, (start, end) in _s7_db_read_ranges(nodes).items():
+            size = max(1, end - start)
+            db_blocks[db_number] = client.db_read(db_number, start, size)
+
+        for point in nodes:
+            address = _format_s7_address(point)
+            try:
+                db_number = point["db_number"]
+                start, _ = _s7_db_read_ranges(nodes)[db_number]
+                point_with_start = {**point, "_read_start": start}
+                raw_value = _parse_s7_value(db_blocks[db_number], point_with_start)
+                items.append(
+                    S7NodeReadItem(
+                        comment=point["comment"],
+                        address=address,
+                        ok=True,
+                        value=str(raw_value),
+                    )
+                )
+            except Exception as exc:
+                items.append(
+                    S7NodeReadItem(
+                        comment=point["comment"],
+                        address=address,
+                        ok=False,
+                        value="",
+                        error=_describe_exception(exc),
+                    )
+                )
+
+        all_ok = all(item.ok for item in items)
+        return (
+            ConnectionTestResult(
+                all_ok,
+                f"{'成功连接' if all_ok else '连接或读取异常'} S7 PLC {host} (rack={rack}, slot={slot})",
+            ),
+            items,
+        )
+    except Exception as exc:
+        return ConnectionTestResult(False, f"S7 PLC 连接失败: {_describe_exception(exc)}"), items
+    finally:
+        try:
+            if client.get_connected():
+                client.disconnect()
+        except Exception:
+            pass
+
+
+def read_s7_nodes(connection_config: dict, node=None) -> tuple[ConnectionTestResult, list[S7NodeReadItem]]:
+    """Read configured S7 DB points (connect per call)."""
+    return _read_s7_nodes(connection_config, node=node)
+
+
+def test_s7_connection(connection_config: dict, node=None) -> ConnectionTestResult:
+    """Connect to Siemens S7 PLC and optionally read configured DB points."""
+    result, items = _read_s7_nodes(connection_config, node=node)
+    if not items:
+        return result
+
+    lines = []
+    failed = False
+    for index, item in enumerate(items, start=1):
+        if item.ok:
+            lines.append(f"{index}. {item.comment} ({item.address}) = {item.value}")
+        else:
+            failed = True
+            lines.append(f"{index}. {item.comment} ({item.address}) = 获取失败 ({item.error})")
+    summary = "\n".join(lines)
+    prefix = "成功连接" if not failed and result.ok else "连接或读取异常"
+    return ConnectionTestResult(
+        (not failed) and result.ok,
+        f"{prefix} {result.message}，点位读取结果（按配置顺序）：\n{summary}",
+    )

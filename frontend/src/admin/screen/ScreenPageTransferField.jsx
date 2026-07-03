@@ -1,29 +1,35 @@
 import { useEffect, useState } from "react";
 
 import { ALL_PAGE_KEY_OPTIONS, SCREEN_PAGE_KEY_OPTIONS, stringifyJson } from "../../adminResources.js";
-import { parseScreenPageTargetKeys } from "./screenPageTransfer.js";
+import { filterBindingsForScreenArea, parseScreenPageTargetKeys } from "./screenPageTransfer.js";
 
 /**
  * 「大屏配置」模块专用：屏幕轮播子页面穿梭框。
- * 若 relatedOptions.screenPageBindings 已加载，则只展示该屏已配置的子页面作为备选；
- * 否则回落到静态 SCREEN_PAGE_KEY_OPTIONS。
+ * 备选项来自「屏幕子页面」绑定：须匹配当前表单的区域 + 左/右屏（与后端 pageBindings 解析一致）。
+ * 若该区域尚无绑定，回落到静态 SCREEN_PAGE_KEY_OPTIONS。
  */
 export function ScreenPageTransferField({ field, formState, setFormState, relatedOptions }) {
   const screenKeyField = field.screenKeyField ?? "screenKey";
+  const areaIdField = field.areaIdField ?? "areaId";
   const screenKey = formState[screenKeyField] || "left";
+  const areaId = formState[areaIdField];
 
-  // 优先从绑定数据动态计算该屏的可用页面
   const bindings = relatedOptions?.screenPageBindings;
-  let options, validKeys;
-  if (Array.isArray(bindings) && bindings.length > 0) {
-    const forScreen = bindings.filter((b) => b.screenKey === screenKey);
+  const forScreenAndArea = filterBindingsForScreenArea(bindings, screenKey, areaId);
+
+  let options;
+  let validKeys;
+  if (forScreenAndArea.length > 0) {
     options = Object.fromEntries(
-      forScreen.map((b) => [b.pageKey, b.pageKeyLabel || ALL_PAGE_KEY_OPTIONS[b.pageKey] || b.pageKey]),
+      forScreenAndArea.map((b) => [b.pageKey, b.pageKeyLabel || ALL_PAGE_KEY_OPTIONS[b.pageKey] || b.pageKey]),
     );
-    validKeys = forScreen.map((b) => b.pageKey);
-  } else {
+    validKeys = forScreenAndArea.map((b) => b.pageKey);
+  } else if (!areaId) {
     options = SCREEN_PAGE_KEY_OPTIONS[screenKey] || {};
     validKeys = Object.keys(options);
+  } else {
+    options = {};
+    validKeys = [];
   }
 
   const targetKeys = parseScreenPageTargetKeys(formState[field.key], validKeys, screenKey);
@@ -47,12 +53,12 @@ export function ScreenPageTransferField({ field, formState, setFormState, relate
         [field.key]: stringifyJson(normalized),
       }));
     }
-  }, [screenKey, validKeys.join(","), field.key, formState[field.key], setFormState]);
+  }, [screenKey, areaId, validKeys.join(","), field.key, formState[field.key], setFormState]);
 
   useEffect(() => {
     setPickedSource(new Set());
     setPickedTarget(new Set());
-  }, [screenKey]);
+  }, [screenKey, areaId]);
 
   function commitTargetKeys(nextKeys) {
     setFormState((current) => ({
@@ -127,7 +133,9 @@ export function ScreenPageTransferField({ field, formState, setFormState, relate
   return (
     <div className="field field--screen-transfer">
       <span>{field.label}</span>
-      <p className="field-hint screen-transfer-hint">右侧顺序即为大屏轮播子页面的先后顺序；选项随「屏幕」左/右切换。</p>
+      <p className="field-hint screen-transfer-hint">
+        右侧为轮播顺序。备选项仅来自「屏幕子页面」中<strong>同一区域</strong>的绑定；01 与 05 需分别新建，互不影响。
+      </p>
       <div className="admin-transfer" role="group" aria-label={field.label}>
         <div className="admin-transfer-panel">
           <div className="admin-transfer-panel-head">
@@ -144,7 +152,9 @@ export function ScreenPageTransferField({ field, formState, setFormState, relate
           </div>
           <div className="admin-transfer-body">
             {sourceKeys.length === 0 ? (
-              <div className="admin-transfer-empty">暂无备选项</div>
+              <div className="admin-transfer-empty">
+                {areaId ? "当前区域暂无子页面绑定，请先在「屏幕子页面」中创建" : "请先选择区域"}
+              </div>
             ) : (
               <ul className="admin-transfer-list">
                 {sourceKeys.map((key) => (
