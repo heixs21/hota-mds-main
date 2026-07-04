@@ -1,50 +1,23 @@
-import { useEffect, useState } from "react";
+import { BrowserRouter, Route, Routes, useParams } from "react-router-dom";
+import { lazy, Suspense } from "react";
+import { Spin } from "antd";
 
-import AdminApp from "./AdminApp.jsx";
 import PlaceholderScreen from "./PlaceholderScreen.jsx";
 import ScreenDisplay from "./ScreenDisplay.jsx";
 
-function usePathname() {
-  const [pathname, setPathname] = useState(window.location.pathname);
+const AdminApp = lazy(() => import("./AdminApp.jsx"));
 
-  useEffect(() => {
-    function handlePopState() {
-      setPathname(window.location.pathname);
-    }
-
-    window.addEventListener("popstate", handlePopState);
-    return () => window.removeEventListener("popstate", handlePopState);
-  }, []);
-
-  function navigate(nextPathname, replace = false) {
-    if (replace) {
-      window.history.replaceState({}, "", nextPathname);
-    } else {
-      window.history.pushState({}, "", nextPathname);
-    }
-    setPathname(nextPathname);
-  }
-
-  return [pathname, navigate];
+function ScreenLeftRoute() {
+  const { areaCode } = useParams();
+  return <ScreenDisplay areaCode={decodeURIComponent(areaCode)} screenKey="left" />;
 }
 
-function App() {
-  const [pathname, navigate] = usePathname();
+function ScreenRightRoute() {
+  const { areaCode } = useParams();
+  return <ScreenDisplay areaCode={decodeURIComponent(areaCode)} screenKey="right" />;
+}
 
-  if (pathname === "/admin/login" || pathname === "/admin/console") {
-    return <AdminApp navigate={navigate} pathname={pathname} />;
-  }
-
-  const leftMatch = pathname.match(/^\/screen\/([^/]+)\/left$/);
-  if (leftMatch) {
-    return <ScreenDisplay areaCode={decodeURIComponent(leftMatch[1])} screenKey="left" />;
-  }
-
-  const rightMatch = pathname.match(/^\/screen\/([^/]+)\/right$/);
-  if (rightMatch) {
-    return <ScreenDisplay areaCode={decodeURIComponent(rightMatch[1])} screenKey="right" />;
-  }
-
+function HomeRoute() {
   return (
     <PlaceholderScreen
       route={{
@@ -55,4 +28,31 @@ function App() {
   );
 }
 
-export default App;
+export default function App() {
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route
+          element={
+            <Suspense
+              fallback={
+                <main className="login-page">
+                  <div className="login-bg-pattern" aria-hidden="true" />
+                  <div className="login-container login-container--checking">
+                    <Spin size="large" />
+                  </div>
+                </main>
+              }
+            >
+              <AdminApp />
+            </Suspense>
+          }
+          path="/admin/*"
+        />
+        <Route element={<ScreenLeftRoute />} path="/screen/:areaCode/left" />
+        <Route element={<ScreenRightRoute />} path="/screen/:areaCode/right" />
+        <Route element={<HomeRoute />} path="*" />
+      </Routes>
+    </BrowserRouter>
+  );
+}

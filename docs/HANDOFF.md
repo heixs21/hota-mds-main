@@ -2219,3 +2219,33 @@
 ### 建议下一轮优先任务
 
 - 若继续收口 M4，建议增加分组折叠与分组图标，进一步提升大屏驾驶舱观感。
+
+## 64. 后台 antd 重构交接（M-B0 ~ M-B4）
+
+### 架构结果
+
+- 路由：`react-router-dom`，扁平路径 `/admin/{slug}`（如 `/admin/devices`）。
+- 壳层：`AdminLayout` + antd `Menu` / `Header` / `Sider`。
+- 业务页：19 个 `pages/*Page.jsx`，经 `createResourcePage` 复用 `ResourceCrudPage`。
+- 表单/对话框：`ResourceField`（antd）、`AdminDialogs`（antd Modal + Table）。
+- 代码分割：`App.jsx` lazy 加载 `AdminApp`；`adminRouteRegistry.js` 按页 lazy；`vite.config.js` 拆分 `antd` / `react-vendor` chunk。
+
+### 已删除的旧实现
+
+- `ResourceEditor.jsx`、`ResourceModalForm.jsx`、`ResourceQueryBar.jsx`
+- `ledger/ResourceTable.jsx`、`sidebar/ResourceSidebar.jsx`
+- `admin.css` 中旧 table/modal/field/transfer 样式（现约 490 行）
+
+### 验证命令
+
+```bash
+cd frontend && npm run build
+```
+
+构建产物应包含独立 `antd-*.js`、`AdminApp-*.js`、各 `*Page-*.js` 与共享 `createResourcePage-*.js`。
+
+### 建议冒烟
+
+- P0：`/admin/login` → 默认页；深链刷新；侧栏高亮
+- P1：devices CRUD；screen-configs 穿梭框；OPC UA 历史 Modal
+- P2：`/screen/*` 不受 antd 影响；暗/亮主题切换

@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { Button, Descriptions, Modal, Table } from "antd";
+import { useEffect, useMemo, useState } from "react";
 
 import { apiRequest } from "../../adminApi.js";
 
@@ -19,6 +20,18 @@ function formatHistoryPayload(payload) {
   }
 }
 
+function formatTime(value) {
+  if (!value) {
+    return "-";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return String(value);
+  }
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
 export function HistoryDialog({ resourceDefinition, item, token, onClose, onUnauthorized, showToast }) {
   const [items, setItems] = useState([]);
   const [total, setTotal] = useState(0);
@@ -36,18 +49,24 @@ export function HistoryDialog({ resourceDefinition, item, token, onClose, onUnau
           `${resourceDefinition.endpoint}/${item.id}/history?page=${page}&pageSize=${pageSize}`,
           { token },
         );
-        if (cancelled) return;
+        if (cancelled) {
+          return;
+        }
         setItems(response.data.items ?? []);
         setTotal(response.data.total ?? 0);
       } catch (error) {
-        if (cancelled) return;
+        if (cancelled) {
+          return;
+        }
         if (error.status === 401) {
           onUnauthorized();
           return;
         }
         showToast(error.message || "历史数据加载失败", { variant: "error" });
       } finally {
-        if (!cancelled) setIsLoading(false);
+        if (!cancelled) {
+          setIsLoading(false);
+        }
       }
     }
     load();
@@ -56,172 +75,124 @@ export function HistoryDialog({ resourceDefinition, item, token, onClose, onUnau
     };
   }, [item.id, page, pageSize, resourceDefinition.endpoint, token, onUnauthorized, showToast]);
 
-  useEffect(() => {
-    function onKeyDown(event) {
-      if (event.key !== "Escape") {
-        return;
-      }
-      event.preventDefault();
-      if (payloadDetailRow) {
-        setPayloadDetailRow(null);
-      } else {
-        onClose();
-      }
-    }
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [onClose, payloadDetailRow]);
-
-  function formatTime(value) {
-    if (!value) return "-";
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return String(value);
-    const pad = (n) => String(n).padStart(2, "0");
-    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
-  }
-
-  function handleBackdropClick(event) {
-    if (event.target === event.currentTarget) {
-      onClose();
-    }
-  }
-
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
-  function handlePayloadBackdropClick(event) {
-    if (event.target === event.currentTarget) {
-      setPayloadDetailRow(null);
-    }
-  }
+  const columns = useMemo(
+    () => [
+      {
+        title: "获取时间",
+        dataIndex: "fetchedAt",
+        key: "fetchedAt",
+        width: 170,
+        render: (value) => formatTime(value),
+      },
+      {
+        title: "设备",
+        key: "device",
+        ellipsis: true,
+        render: (_, row) => row.deviceName || row.deviceCode || "-",
+      },
+      {
+        title: "成功",
+        dataIndex: "readOk",
+        key: "readOk",
+        width: 72,
+        render: (value) => (value ? "是" : "否"),
+      },
+      {
+        title: "离线",
+        dataIndex: "offline",
+        key: "offline",
+        width: 72,
+        render: (value) => (value ? "是" : "否"),
+      },
+      {
+        title: "耗时(ms)",
+        dataIndex: "durationMs",
+        key: "durationMs",
+        width: 96,
+        render: (value) => (value != null ? value : "-"),
+      },
+      {
+        title: "来源",
+        dataIndex: "trigger",
+        key: "trigger",
+        width: 100,
+        render: (value) => value || "-",
+      },
+      {
+        title: "摘要",
+        dataIndex: "failureSummary",
+        key: "failureSummary",
+        ellipsis: true,
+        render: (value, row) => value || (row.readOk ? "正常" : "失败"),
+      },
+      {
+        title: "操作",
+        key: "actions",
+        fixed: "right",
+        width: 110,
+        render: (_, row) => (
+          <Button onClick={() => setPayloadDetailRow(row)} size="small" type="link">
+            查看详情
+          </Button>
+        ),
+      },
+    ],
+    [],
+  );
 
   return (
     <>
-      <div className="modal-backdrop" onMouseDown={handleBackdropClick}>
-      <div className="modal-dialog modal-dialog--opcua-history" role="dialog" aria-modal="true" aria-label="OPC UA 历史数据">
-        <div className="modal-header">
-          <h3>OPC UA 历史数据 - {item.name || item.code}</h3>
-          <button aria-label="关闭" className="modal-close" onClick={onClose} type="button">
-            ×
-          </button>
-        </div>
+      <Modal
+        destroyOnClose
+        footer={
+          <Button onClick={onClose} type="default">
+            关闭
+          </Button>
+        }
+        onCancel={onClose}
+        open
+        title={`OPC UA 历史数据 - ${item.name || item.code}`}
+        width={1200}
+      >
+        <Table
+          columns={columns}
+          dataSource={items}
+          loading={isLoading}
+          locale={{ emptyText: isLoading ? "正在加载..." : "该数据源暂无历史数据" }}
+          pagination={{
+            current: page,
+            onChange: (nextPage, nextPageSize) => {
+              setPage(nextPage);
+              setPageSize(nextPageSize);
+            },
+            pageSize,
+            pageSizeOptions: [10, 20, 50],
+            showSizeChanger: true,
+            showTotal: () => `共 ${total} 条，当前第 ${page}/${totalPages} 页`,
+            total,
+          }}
+          rowKey="id"
+          scroll={{ x: "max-content" }}
+          size="small"
+        />
+      </Modal>
 
-        <div className="modal-body modal-body--table">
-          {isLoading ? (
-            <div className="modal-empty">正在加载...</div>
-          ) : items.length === 0 ? (
-            <div className="modal-empty">该数据源暂无历史数据</div>
-          ) : (
-            <div className="table-wrap table-wrap--opcua-history">
-              <table className="data-table opcua-history-table">
-                <thead>
-                  <tr>
-                    <th>获取时间</th>
-                    <th>设备</th>
-                    <th>成功</th>
-                    <th>离线</th>
-                    <th>耗时(ms)</th>
-                    <th>来源</th>
-                    <th>摘要</th>
-                    <th className="opcua-history-col-action">查看详情</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {items.map((row) => (
-                    <tr key={row.id}>
-                      <td>{formatTime(row.fetchedAt)}</td>
-                      <td>{row.deviceName || row.deviceCode || "-"}</td>
-                      <td>{row.readOk ? "是" : "否"}</td>
-                      <td>{row.offline ? "是" : "否"}</td>
-                      <td>{row.durationMs != null ? row.durationMs : "-"}</td>
-                      <td>{row.trigger || "-"}</td>
-                      <td>{row.failureSummary || (row.readOk ? "正常" : "失败")}</td>
-                      <td className="opcua-history-col-action">
-                        <button
-                          className="ghost-button opcua-history-detail-button"
-                          onClick={() => setPayloadDetailRow(row)}
-                          type="button"
-                        >
-                          查看详情
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-
-        <div className="modal-footer modal-footer--between">
-          <div className="table-pagination-meta">
-            共 {total} 条，当前第 {page}/{totalPages} 页
-          </div>
-          <div className="table-pagination-actions">
-            <label className="table-page-size">
-              每页
-              <select
-                value={pageSize}
-                onChange={(event) => {
-                  setPage(1);
-                  setPageSize(Number(event.target.value));
-                }}
-              >
-                {[10, 20, 50].map((size) => (
-                  <option key={size} value={size}>
-                    {size}
-                  </option>
-                ))}
-              </select>
-              条
-            </label>
-            <button disabled={page <= 1 || isLoading} onClick={() => setPage(page - 1)} type="button">
-              上一页
-            </button>
-            <button disabled={page >= totalPages || isLoading} onClick={() => setPage(page + 1)} type="button">
-              下一页
-            </button>
-            <button className="ghost-button" onClick={onClose} type="button">
-              关闭
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-
-      {payloadDetailRow ? (
-        <div
-          className="modal-backdrop modal-backdrop--nested"
-          onMouseDown={handlePayloadBackdropClick}
-          role="presentation"
-        >
-          <div
-            className="modal-dialog modal-dialog--opcua-payload"
-            role="dialog"
-            aria-modal="true"
-            aria-label="历史记录 payload"
-          >
-            <div className="modal-header">
-              <h3>读数明细（payload）</h3>
-              <button
-                aria-label="关闭"
-                className="modal-close"
-                onClick={() => setPayloadDetailRow(null)}
-                type="button"
-              >
-                ×
-              </button>
-            </div>
-            <div className="modal-body modal-body--opcua-payload">
-              <pre className="opcua-payload-pre">{formatHistoryPayload(payloadDetailRow.payload)}</pre>
-            </div>
-            <div className="modal-footer">
-              <button className="ghost-button" onClick={() => setPayloadDetailRow(null)} type="button">
-                关闭
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
+      <Modal
+        destroyOnClose
+        footer={
+          <Button onClick={() => setPayloadDetailRow(null)} type="default">
+            关闭
+          </Button>
+        }
+        onCancel={() => setPayloadDetailRow(null)}
+        open={Boolean(payloadDetailRow)}
+        title="读数明细（payload）"
+        width={860}
+      >
+        <pre className="resource-crud-readonly-detail">{formatHistoryPayload(payloadDetailRow?.payload)}</pre>
+      </Modal>
     </>
   );
 }
@@ -229,12 +200,6 @@ export function HistoryDialog({ resourceDefinition, item, token, onClose, onUnau
 export function DeviceDetailDialog({ device, onClose }) {
   if (!device) {
     return null;
-  }
-
-  function handleBackdropClick(event) {
-    if (event.target === event.currentTarget) {
-      onClose();
-    }
   }
 
   const fields = [
@@ -249,33 +214,29 @@ export function DeviceDetailDialog({ device, onClose }) {
   ];
 
   return (
-    <div className="modal-backdrop" onMouseDown={handleBackdropClick}>
-      <div className="modal-dialog modal-dialog--device-detail" role="dialog" aria-modal="true" aria-label="设备详情">
-        <div className="modal-header">
-          <h3>设备详情</h3>
-          <button aria-label="关闭" className="modal-close" onClick={onClose} type="button">
-            ×
-          </button>
-        </div>
-        <div className="modal-body">
-          <div className="device-detail-grid">
-            {fields.map(([label, value]) => (
-              <div
-                className={`device-detail-item${label === "备注" ? " device-detail-item--full" : ""}`}
-                key={label}
-              >
-                <div className="device-detail-label">{label}</div>
-                <div className="device-detail-value">{value === undefined || value === "" ? "—" : String(value)}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-        <div className="modal-footer">
-          <button className="ghost-button" onClick={onClose} type="button">
-            关闭
-          </button>
-        </div>
-      </div>
-    </div>
+    <Modal
+      destroyOnClose
+      footer={
+        <Button onClick={onClose} type="default">
+          关闭
+        </Button>
+      }
+      onCancel={onClose}
+      open
+      title="设备详情"
+      width={640}
+    >
+      <Descriptions bordered column={2} size="small">
+        {fields.map(([label, fieldValue]) => (
+          <Descriptions.Item
+            key={label}
+            label={label}
+            span={label === "备注" ? 2 : 1}
+          >
+            {fieldValue === undefined || fieldValue === "" ? "—" : String(fieldValue)}
+          </Descriptions.Item>
+        ))}
+      </Descriptions>
+    </Modal>
   );
 }
