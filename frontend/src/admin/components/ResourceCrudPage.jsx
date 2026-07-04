@@ -4,6 +4,7 @@ import { useCallback, useMemo, useRef } from "react";
 
 import { formatCellValue, stringifyJson } from "../../adminResources.js";
 import { useAdminSession } from "../context/AdminSessionContext.jsx";
+import { buildRowIndexColumn } from "../adminUtils.js";
 import { useResourceCrud } from "../hooks/useResourceCrud.js";
 import { useTableBodyScrollY } from "../hooks/useTableBodyScrollY.js";
 import { DeviceDetailDialog, HistoryDialog } from "../system/AdminDialogs.jsx";
@@ -110,7 +111,9 @@ export default function ResourceCrudPage({ resourceKey }) {
   ]);
 
   const columns = useMemo(() => {
-    const nextColumns = resourceDefinition.columns.map((column) => ({
+    const nextColumns = [
+      buildRowIndexColumn(crud.page, crud.pageSize),
+      ...resourceDefinition.columns.map((column) => ({
       title: column.label,
       dataIndex: column.key,
       key: column.key,
@@ -138,7 +141,8 @@ export default function ResourceCrudPage({ resourceKey }) {
         }
         return formatCellValue(value, column, record);
       },
-    }));
+    })),
+    ];
 
     if (resourceDefinition.supportsHistory) {
       nextColumns.push({
@@ -194,54 +198,54 @@ export default function ResourceCrudPage({ resourceKey }) {
   }, [crud, resourceDefinition]);
 
   const trailingActions =
-    resourceDefinition.supportsCopyAsNew && !resourceDefinition.readOnly ? (
-      <Button
-        disabled={crud.isLoading || crud.isCopying || crud.checkedIds.size === 0}
-        icon={<CopyOutlined />}
-        loading={crud.isCopying}
-        onClick={() => {
-          if (crud.checkedIds.size > 1) {
-            Modal.confirm({
-              cancelText: "取消",
-              content: `确定要复制选中的 ${crud.checkedIds.size} 条${resourceDefinition.itemLabel}并新增吗？将自动为编码添加 _copy 后缀。`,
-              okText: "复制新增",
-              onOk: () => crud.handleBatchCopyAsNew(),
-              title: "复制新增",
-            });
-            return;
-          }
-          crud.handleBatchCopyAsNew();
-        }}
-      >
-        复制新增
-      </Button>
-    ) : null;
+    !resourceDefinition.readOnly &&
+    (crud.checkedIds.size > 0 || resourceDefinition.supportsCopyAsNew) ? (
+      <Space wrap>
+      {crud.checkedIds.size > 0 ? (
+        <Popconfirm
+          cancelText="取消"
+          okText="删除"
+          okType="danger"
+          onConfirm={crud.handleBatchDelete}
+          title={`确定要批量删除选中的 ${crud.checkedIds.size} 条${resourceDefinition.itemLabel}吗？`}
+        >
+          <Button danger loading={crud.isBatchDeleting}>
+            批量删除
+          </Button>
+        </Popconfirm>
+      ) : null}
+      {resourceDefinition.supportsCopyAsNew ? (
+        <Button
+          disabled={crud.isLoading || crud.isCopying || crud.checkedIds.size === 0}
+          icon={<CopyOutlined />}
+          loading={crud.isCopying}
+          onClick={() => {
+            if (crud.checkedIds.size > 1) {
+              Modal.confirm({
+                cancelText: "取消",
+                content: `确定要复制选中的 ${crud.checkedIds.size} 条${resourceDefinition.itemLabel}并新增吗？将自动为编码添加 _copy 后缀。`,
+                okText: "复制新增",
+                onOk: () => crud.handleBatchCopyAsNew(),
+                title: "复制新增",
+              });
+              return;
+            }
+            crud.handleBatchCopyAsNew();
+          }}
+        >
+          复制新增
+        </Button>
+      ) : null}
+    </Space>
+  ) : null;
 
   return (
     <section className="resource-crud-page">
       <Flex align="center" className="resource-crud-header" justify="space-between">
-        <Space direction="vertical" size={0}>
-          <Typography.Title level={4} style={{ margin: 0 }}>
-            {resourceDefinition.label}
-          </Typography.Title>
-          {crud.checkedIds.size > 0 && !resourceDefinition.readOnly ? (
-            <Typography.Text type="secondary">已选 {crud.checkedIds.size} 条</Typography.Text>
-          ) : null}
-        </Space>
+        <Typography.Title level={4} style={{ margin: 0 }}>
+          {resourceDefinition.label}
+        </Typography.Title>
         <Space wrap>
-          {crud.checkedIds.size > 0 && !resourceDefinition.readOnly ? (
-            <Popconfirm
-              cancelText="取消"
-              okText="删除"
-              okType="danger"
-              onConfirm={crud.handleBatchDelete}
-              title={`确定要批量删除选中的 ${crud.checkedIds.size} 条${resourceDefinition.itemLabel}吗？`}
-            >
-              <Button danger loading={crud.isBatchDeleting}>
-                批量删除
-              </Button>
-            </Popconfirm>
-          ) : null}
           {!resourceDefinition.readOnly ? (
             <Button icon={<PlusOutlined />} onClick={crud.handleCreateNew} type="primary">
               新建{resourceDefinition.itemLabel}
@@ -271,12 +275,24 @@ export default function ResourceCrudPage({ resourceKey }) {
             loading={crud.isLoading}
             locale={{ emptyText: "还没有数据" }}
             pagination={{
+              className: "resource-crud-pagination",
               current: crud.page,
               onChange: (nextPage, nextPageSize) => crud.handlePageChange(nextPage, nextPageSize),
               pageSize: crud.pageSize,
               pageSizeOptions: [10, 20, 50],
               showSizeChanger: true,
-              showTotal: (value) => `共 ${value} 条，当前第 ${crud.page}/${Math.max(1, Math.ceil(value / crud.pageSize))} 页`,
+              showTotal: (value) => (
+                <Space className="resource-crud-pagination-summary" size="middle">
+                  {crud.checkedIds.size > 0 && !resourceDefinition.readOnly ? (
+                    <Typography.Text className="resource-crud-selection-count" type="secondary">
+                      已选 {crud.checkedIds.size} 条
+                    </Typography.Text>
+                  ) : null}
+                  <Typography.Text type="secondary">
+                    {`共 ${value} 条，当前第 ${crud.page}/${Math.max(1, Math.ceil(value / crud.pageSize))} 页`}
+                  </Typography.Text>
+                </Space>
+              ),
               total: crud.total,
             }}
             rowKey="id"

@@ -1,4 +1,5 @@
-import { Button, Form, Input, Select, Space } from "antd";
+import { Button, DatePicker, Form, Input, Select, Space } from "antd";
+import dayjs from "dayjs";
 
 export function AntResourceQueryBar({
   bulkToolbarExtra,
@@ -17,6 +18,21 @@ export function AntResourceQueryBar({
 
   function renderQueryField(field) {
     const value = queryState[field.key] ?? "";
+
+    if (field.type === "date") {
+      return (
+        <Form.Item key={field.key} label={field.label}>
+          <DatePicker
+            allowClear
+            disabled={disabled}
+            format="YYYY-MM-DD"
+            onChange={(date) => onChange(field.key, date ? date.format("YYYY-MM-DD") : "")}
+            style={{ width: 180 }}
+            value={value ? dayjs(value) : null}
+          />
+        </Form.Item>
+      );
+    }
 
     if (field.type === "select") {
       return (
@@ -64,7 +80,6 @@ export function AntResourceQueryBar({
           onPressEnter={onSearch}
           placeholder={field.placeholder ?? ""}
           style={{ width: 180 }}
-          type={field.type === "date" ? "date" : "text"}
           value={value}
         />
       </Form.Item>

@@ -1,5 +1,5 @@
 import { Alert, Checkbox, Form, Input, InputNumber, Select, Spin, Typography } from "antd";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { ADMIN_TOKEN_STORAGE_KEY, apiRequest } from "../adminApi.js";
 import { fieldVisibleForForm } from "../adminResources.js";
@@ -9,30 +9,32 @@ function matchesVisibleWhen(field, formState) {
   return fieldVisibleForForm(field, formState);
 }
 
-function MultiSelectOptions({ emptyText, field, onChange, options, value }) {
-  const selectedSet = new Set(Array.isArray(value) ? value.map(String) : []);
+function toResourceSelectOptions(options) {
+  return options.map((option) => ({
+    value: String(option.id),
+    label: option.code ? `${option.code} - ${option.name}` : option.name,
+  }));
+}
+
+function ResourceMultiSelectField({ emptyHint, extra, label, onChange, options, value }) {
+  const selectOptions = useMemo(() => toResourceSelectOptions(options), [options]);
+  const selectedValues = Array.isArray(value) ? value.map(String) : [];
 
   return (
-    <div className="resource-field-multi-select">
-      {options.length === 0 ? (
-        <Typography.Text type="secondary">{emptyText}</Typography.Text>
-      ) : (
-        <Checkbox.Group
-          onChange={(checkedValues) => onChange(checkedValues)}
-          value={[...selectedSet]}
-        >
-          {options.map((option) => {
-            const idStr = String(option.id);
-            const labelText = option.code ? `${option.code} - ${option.name}` : option.name;
-            return (
-              <div className="resource-field-multi-select-row" key={option.id}>
-                <Checkbox value={idStr}>{labelText}</Checkbox>
-              </div>
-            );
-          })}
-        </Checkbox.Group>
-      )}
-    </div>
+    <Form.Item extra={extra} label={label}>
+      <Select
+        allowClear
+        maxTagCount="responsive"
+        mode="multiple"
+        onChange={(nextValues) => onChange(nextValues ?? [])}
+        optionFilterProp="label"
+        options={selectOptions}
+        placeholder={options.length === 0 ? emptyHint : "请选择"}
+        showSearch
+        style={{ width: "100%" }}
+        value={selectedValues}
+      />
+    </Form.Item>
   );
 }
 
@@ -108,10 +110,7 @@ export function ResourceField({ field, formState, setFormState, relatedOptions }
           onChange={(nextValue) => updateValue(nextValue ?? "")}
           options={[
             ...(field.allowBlank ? [{ value: "", label: "不设置" }] : [{ value: "", label: "请选择", disabled: true }]),
-            ...options.map((option) => ({
-              value: String(option.id),
-              label: option.code ? `${option.code} - ${option.name}` : option.name,
-            })),
+            ...toResourceSelectOptions(options),
           ]}
           showSearch
           value={value ?? ""}
@@ -134,24 +133,20 @@ export function ResourceField({ field, formState, setFormState, relatedOptions }
       : "请先在上方的「数据源类型」中选择 OPC UA、数据库等。";
 
     return (
-      <Form.Item
+      <ResourceMultiSelectField
+        emptyHint={emptyHint}
         extra="仅列出与所选类型一致的数据源；可多选。"
         label={field.label}
-      >
-        <MultiSelectOptions
-          emptyText={emptyHint}
-          field={field}
-          onChange={(checkedValues) =>
-            updateValue(
-              checkedValues
-                .map((id) => Number(id))
-                .filter((id) => Number.isInteger(id) && id > 0),
-            )
-          }
-          options={options}
-          value={value}
-        />
-      </Form.Item>
+        onChange={(nextValues) =>
+          updateValue(
+            nextValues
+              .map((id) => Number(id))
+              .filter((id) => Number.isInteger(id) && id > 0),
+          )
+        }
+        options={options}
+        value={value}
+      />
     );
   }
 
@@ -159,15 +154,14 @@ export function ResourceField({ field, formState, setFormState, relatedOptions }
     const options = relatedOptions[field.resource] ?? [];
 
     return (
-      <Form.Item extra="可多选；列表过长时可滚动。" label={field.label}>
-        <MultiSelectOptions
-          emptyText="暂无可选设备（请先维护设备台账）"
-          field={field}
-          onChange={(checkedValues) => updateValue([...checkedValues])}
-          options={options}
-          value={value}
-        />
-      </Form.Item>
+      <ResourceMultiSelectField
+        emptyHint="暂无可选设备（请先维护设备台账）"
+        extra="可多选。"
+        label={field.label}
+        onChange={(nextValues) => updateValue([...nextValues])}
+        options={options}
+        value={value}
+      />
     );
   }
 
@@ -179,6 +173,21 @@ export function ResourceField({ field, formState, setFormState, relatedOptions }
           placeholder={field.placeholder ?? ""}
           style={{ width: "100%" }}
           value={value === "" || value == null ? null : Number(value)}
+        />
+      </Form.Item>
+    );
+  }
+
+  if (field.type === "decimal") {
+    return (
+      <Form.Item label={field.label}>
+        <InputNumber
+          onChange={(nextValue) => updateValue(nextValue == null ? "" : String(nextValue))}
+          placeholder={field.placeholder ?? ""}
+          step={0.01}
+          stringMode
+          style={{ width: "100%" }}
+          value={value === "" || value == null ? null : value}
         />
       </Form.Item>
     );
@@ -254,19 +263,19 @@ function EnergyDatabaseEquipmentMultiField({ field, formState, setFormState }) {
     };
   }, [bindingType, firstDs]);
 
-  const selectedSet = new Set(Array.isArray(value) ? value.map(String) : []);
-
-  function toggleValues(checkedValues) {
-    setFormState((current) => ({
-      ...current,
-      [field.key]: [...checkedValues],
-    }));
-  }
+  const selectOptions = useMemo(
+    () =>
+      options.map((option) => ({
+        value: String(option.id),
+        label: option.label,
+      })),
+    [options],
+  );
 
   if (bindingType !== "database") {
     return (
       <Form.Item label={field.label}>
-        <Alert showIcon type="info" message="请先将「数据源类型」设为数据库，再勾选 platform_equipment 表计。" />
+        <Alert showIcon type="info" message="请先将「数据源类型」设为数据库，再选择 platform_equipment 表计。" />
       </Form.Item>
     );
   }
@@ -286,21 +295,27 @@ function EnergyDatabaseEquipmentMultiField({ field, formState, setFormState }) {
     >
       {loadErr ? <Alert showIcon style={{ marginBottom: 12 }} type="error" message={loadErr} /> : null}
       <Spin spinning={loading}>
-        <div className="resource-field-multi-select">
-          {!loading && options.length === 0 ? (
-            <Typography.Text type="secondary">
-              暂无同步数据。请先运行后端定时任务 sync_energy_dashboard_snapshots（或等待下一轮同步）。
-            </Typography.Text>
-          ) : (
-            <Checkbox.Group onChange={toggleValues} value={[...selectedSet]}>
-              {options.map((option) => (
-                <div className="resource-field-multi-select-row" key={option.id}>
-                  <Checkbox value={String(option.id)}>{option.label}</Checkbox>
-                </div>
-              ))}
-            </Checkbox.Group>
-          )}
-        </div>
+        <Select
+          allowClear
+          disabled={loading}
+          maxTagCount="responsive"
+          mode="multiple"
+          notFoundContent={
+            loading ? null : "暂无同步数据。请先运行后端定时任务 sync_energy_dashboard_snapshots（或等待下一轮同步）。"
+          }
+          onChange={(nextValues) =>
+            setFormState((current) => ({
+              ...current,
+              [field.key]: [...(nextValues ?? [])],
+            }))
+          }
+          optionFilterProp="label"
+          options={selectOptions}
+          placeholder="请选择表计"
+          showSearch
+          style={{ width: "100%" }}
+          value={Array.isArray(value) ? value.map(String) : []}
+        />
       </Spin>
     </Form.Item>
   );

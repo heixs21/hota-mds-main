@@ -1,9 +1,11 @@
-import { ConfigProvider, Spin } from "antd";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { ConfigProvider, Flex, Spin, message } from "antd";
+import zhCN from "antd/locale/zh_CN";
+import { useCallback, useEffect, useState } from "react";
 import { Navigate, Outlet, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 
 import { DEFAULT_ADMIN_RESOURCE } from "../adminResources.js";
 import { ADMIN_TOKEN_STORAGE_KEY, apiRequest } from "../adminApi.js";
+import { humanizeAdminApiError } from "../adminUserFacingMessages.js";
 import LoginPage from "./LoginPage.jsx";
 import { AdminSessionProvider, useAdminSession } from "./context/AdminSessionContext.jsx";
 import AdminLayout from "./layout/AdminLayout.jsx";
@@ -15,19 +17,14 @@ import {
   isAdminResourcePath,
   resourceKeyToPath,
 } from "./routes/resourcePaths.js";
-import { buildAdminAntdTheme } from "./adminTheme.js";
+import { adminTheme } from "./adminTheme.js";
 import { buildActiveResourceStorageKey } from "./adminUtils.js";
-
-const THEME_STORAGE_KEY = "admin-theme";
 
 function SessionCheckingView() {
   return (
-    <main className="login-page">
-      <div className="login-bg-pattern" aria-hidden="true" />
-      <div className="login-container login-container--checking">
-        <Spin size="large" />
-      </div>
-    </main>
+    <Flex align="center" className="login-page" justify="center">
+      <Spin size="large" />
+    </Flex>
   );
 }
 
@@ -47,18 +44,7 @@ function RequireAuth() {
 }
 
 function AdminLoginRoute() {
-  const {
-    currentUser,
-    sessionChecked,
-    token,
-    loginErrorMessage,
-    loginIsSubmitting,
-    loginPassword,
-    loginUsername,
-    onLoginSubmit,
-    setLoginPassword,
-    setLoginUsername,
-  } = useAdminSession();
+  const { currentUser, sessionChecked, token, loginIsSubmitting, onLoginSubmit } = useAdminSession();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -89,17 +75,7 @@ function AdminLoginRoute() {
     return null;
   }
 
-  return (
-    <LoginPage
-      errorMessage={loginErrorMessage}
-      isSubmitting={loginIsSubmitting}
-      onSubmit={onLoginSubmit}
-      password={loginPassword}
-      setPassword={setLoginPassword}
-      setUsername={setLoginUsername}
-      username={loginUsername}
-    />
-  );
+  return <LoginPage isSubmitting={loginIsSubmitting} onSubmit={onLoginSubmit} />;
 }
 
 function AdminIndexRedirect() {
@@ -117,33 +93,17 @@ function UnknownAdminRedirect() {
 }
 
 export default function AdminApp() {
-  const [loginUsername, setLoginUsername] = useState("");
-  const [loginPassword, setLoginPassword] = useState("");
   const [token, setToken] = useState(() => window.sessionStorage.getItem(ADMIN_TOKEN_STORAGE_KEY) ?? "");
   const [currentUser, setCurrentUser] = useState(null);
   const [sessionChecked, setSessionChecked] = useState(() => !window.sessionStorage.getItem(ADMIN_TOKEN_STORAGE_KEY));
-  const [loginErrorMessage, setLoginErrorMessage] = useState("");
   const [loginIsSubmitting, setLoginIsSubmitting] = useState(false);
-  const [theme, setTheme] = useState(() => window.localStorage.getItem(THEME_STORAGE_KEY) || "dark");
   const navigate = useNavigate();
-
-  const antdTheme = useMemo(() => buildAdminAntdTheme(theme), [theme]);
-
-  useEffect(() => {
-    document.documentElement.dataset.theme = theme;
-    window.localStorage.setItem(THEME_STORAGE_KEY, theme);
-  }, [theme]);
-
-  const toggleTheme = useCallback(() => {
-    setTheme((prev) => (prev === "dark" ? "light" : "dark"));
-  }, []);
 
   const clearSession = useCallback(
     (navigateToLogin = false) => {
       window.sessionStorage.removeItem(ADMIN_TOKEN_STORAGE_KEY);
       setToken("");
       setCurrentUser(null);
-      setLoginPassword("");
       setSessionChecked(true);
       if (navigateToLogin) {
         navigate(ADMIN_LOGIN_PATH, { replace: true });
@@ -192,15 +152,13 @@ export default function AdminApp() {
   }, [token, currentUser, clearSession]);
 
   const onLoginSubmit = useCallback(
-    async (event) => {
-      event.preventDefault();
+    async ({ username, password }) => {
       setLoginIsSubmitting(true);
-      setLoginErrorMessage("");
 
       try {
         const payload = await apiRequest("/api/admin/auth/login", {
           method: "POST",
-          body: { username: loginUsername, password: loginPassword },
+          body: { username, password },
         });
         const nextToken = payload.data.access_token;
         const user = payload.data.user;
@@ -209,16 +167,16 @@ export default function AdminApp() {
         setToken(nextToken);
         setCurrentUser(user);
         setSessionChecked(true);
-        setLoginPassword("");
+        message.success("登录成功");
         navigate(getDefaultAdminPath(user.username), { replace: true });
       } catch (error) {
-        setLoginErrorMessage(error.message || "登录失败，请检查账号和密码。");
+        message.error(humanizeAdminApiError(error, [], { fallback: "登录失败，请检查账号和密码。" }));
         clearSession();
       } finally {
         setLoginIsSubmitting(false);
       }
     },
-    [clearSession, loginPassword, loginUsername, navigate],
+    [clearSession, navigate],
   );
 
   const onLogout = useCallback(async () => {
@@ -234,41 +192,18 @@ export default function AdminApp() {
     clearSession(true);
   }, [clearSession, currentUser?.username, token]);
 
-  const sessionValue = useMemo(
-    () => ({
-      currentUser,
-      sessionChecked,
-      token,
-      theme,
-      onToggleTheme: toggleTheme,
-      onLogout,
-      onUnauthorized: () => clearSession(true),
-      loginUsername,
-      setLoginUsername,
-      loginPassword,
-      setLoginPassword,
-      loginErrorMessage,
-      loginIsSubmitting,
-      onLoginSubmit,
-    }),
-    [
-      clearSession,
-      currentUser,
-      loginErrorMessage,
-      loginIsSubmitting,
-      loginPassword,
-      loginUsername,
-      onLoginSubmit,
-      onLogout,
-      sessionChecked,
-      theme,
-      toggleTheme,
-      token,
-    ],
-  );
+  const sessionValue = {
+    currentUser,
+    sessionChecked,
+    token,
+    onLogout,
+    onUnauthorized: () => clearSession(true),
+    loginIsSubmitting,
+    onLoginSubmit,
+  };
 
   return (
-    <ConfigProvider theme={antdTheme}>
+    <ConfigProvider locale={zhCN} theme={adminTheme}>
       <AdminSessionProvider value={sessionValue}>
         <Routes>
           <Route element={<AdminLoginRoute />} path="login" />

@@ -1,6 +1,7 @@
 import { LogoutOutlined, UserOutlined } from "@ant-design/icons";
 import { Button, Dropdown, Layout, Space, Spin, Typography } from "antd";
-import { Suspense, useEffect, useState } from "react";import { Outlet, useLocation } from "react-router-dom";
+import { Suspense, useEffect, useState } from "react";
+import { Outlet, useLocation } from "react-router-dom";
 
 import { DEFAULT_ADMIN_RESOURCE } from "../../adminResources.js";
 import { useAdminSession } from "../context/AdminSessionContext.jsx";
@@ -11,7 +12,7 @@ import AdminSidebar from "./AdminSidebar.jsx";
 const { Content, Header } = Layout;
 
 export default function AdminLayout() {
-  const { currentUser, onLogout, onToggleTheme, theme } = useAdminSession();
+  const { currentUser, onLogout } = useAdminSession();
   const location = useLocation();
   const [collapsed, setCollapsed] = useState(false);
   const activeResource = pathToResourceKey(location.pathname) ?? DEFAULT_ADMIN_RESOURCE;
@@ -39,10 +40,10 @@ export default function AdminLayout() {
     <Layout className="admin-app">
       <Header className="admin-app-header">
         <Space direction="vertical" size={0}>
-          <Typography.Text className="admin-app-eyebrow">HOTA MDS</Typography.Text>
           <Typography.Title level={5} style={{ margin: 0 }}>
             后台管理控制台
           </Typography.Title>
+          <Typography.Text type="secondary">HOTA MDS</Typography.Text>
         </Space>
         <Space align="center" size="middle">
           <Typography.Text type="secondary">{currentUser.displayName}</Typography.Text>
@@ -60,10 +61,9 @@ export default function AdminLayout() {
           collapsible
           collapsed={collapsed}
           onCollapse={setCollapsed}
-          theme={theme === "dark" ? "dark" : "light"}
           width={220}
         >
-          <AdminSidebar activeResource={activeResource} onToggleTheme={onToggleTheme} theme={theme} />
+          <AdminSidebar activeResource={activeResource} />
         </Layout.Sider>
         <Content className="admin-app-content">
           <Suspense

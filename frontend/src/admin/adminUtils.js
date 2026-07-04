@@ -15,3 +15,14 @@ export function httpErrorToastVariant(status) {
   }
   return "error";
 }
+
+/** Display-only row index column; respects current pagination. */
+export function buildRowIndexColumn(page, pageSize) {
+  return {
+    title: "序号",
+    key: "__rowIndex",
+    width: 64,
+    align: "center",
+    render: (_, __, index) => (page - 1) * pageSize + index + 1,
+  };
+}

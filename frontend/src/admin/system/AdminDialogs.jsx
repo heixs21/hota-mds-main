@@ -2,6 +2,7 @@ import { Button, Descriptions, Modal, Table } from "antd";
 import { useEffect, useMemo, useState } from "react";
 
 import { apiRequest } from "../../adminApi.js";
+import { buildRowIndexColumn } from "../adminUtils.js";
 
 /**
  * 「系统设置」侧：数据源历史、设备详情等弹窗。
@@ -79,6 +80,7 @@ export function HistoryDialog({ resourceDefinition, item, token, onClose, onUnau
 
   const columns = useMemo(
     () => [
+      buildRowIndexColumn(page, pageSize),
       {
         title: "获取时间",
         dataIndex: "fetchedAt",
@@ -139,7 +141,7 @@ export function HistoryDialog({ resourceDefinition, item, token, onClose, onUnau
         ),
       },
     ],
-    [],
+    [page, pageSize],
   );
 
   return (

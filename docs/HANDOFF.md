@@ -2358,3 +2358,55 @@ cd frontend && npm run build              # 构建时同样校验 schema
 - `docs/STATUS.md`
 - `docs/ADMIN_SCHEMA.md`
 - `docs/HANDOFF.md`
+
+## 68. antd 默认浅色主题 refactor（M-V）
+
+### 本轮目标
+
+- 去掉仿 Linear 深色 `--adm-*` 与自定义 `adminTheme` token。
+- 固定 **antd 默认浅色**（`defaultAlgorithm`），**移除明/暗切换**。
+- 查询日期、多选、decimal、登录表单改为标准 antd 组件。
+
+### 本轮实际完成
+
+- **`adminTheme.js`**：仅 `theme.defaultAlgorithm`。
+- **`AdminApp.jsx`**：`ConfigProvider locale={zhCN}`；删除 `theme` state / `data-theme` / 侧栏切换。
+- **`admin.css`**：从 ~490 行减至 ~140 行，仅保留 flex 布局 helper。
+- **`LoginPage`**：`Flex` + `Card` + antd `Form`（无渐变背景/品牌装饰）。
+- **`AntResourceQueryBar`**：`DatePicker` + `dayjs`。
+- **`ResourceField`**：`Select mode="multiple"`、`InputNumber`（decimal）、能耗多选改 Select。
+- **`package.json`**：显式依赖 `dayjs`。
+
+### 验证
+
+```bash
+cd frontend && npm run build && npm run validate:schemas
+```
+
+CSS 产物约 71KB（原 admin 相关 ~77KB）。
+
+## 68. antd 默认浅色主题 refactor（M-V）
+
+### 本轮目标
+
+- 去掉仿 Linear 深色 `--adm-*` 与自定义 `adminTheme` token。
+- 固定 **antd 默认浅色**（`defaultAlgorithm`），**移除明/暗切换**。
+- 查询日期、多选、decimal、登录表单改为标准 antd 组件。
+
+### 本轮实际完成
+
+- **`adminTheme.js`**：仅 `theme.defaultAlgorithm`。
+- **`AdminApp.jsx`**：`ConfigProvider locale={zhCN}`；删除 `theme` state / `data-theme` / 侧栏切换。
+- **`admin.css`**：从 ~490 行减至 ~140 行，仅保留 flex 布局 helper。
+- **`LoginPage`**：`Flex` + `Card` + antd `Form`（无渐变背景/品牌装饰）。
+- **`AntResourceQueryBar`**：`DatePicker` + `dayjs`。
+- **`ResourceField`**：`Select mode="multiple"`、`InputNumber`（decimal）、能耗多选改 Select。
+- **`package.json`**：显式依赖 `dayjs`。
+
+### 验证
+
+```bash
+cd frontend && npm run build && npm run validate:schemas
+```
+
+CSS 产物约 71KB（原 admin 相关 ~77KB）。
