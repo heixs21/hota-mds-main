@@ -2242,6 +2242,151 @@ html[data-theme="dark"] {
   min-height: 100dvh;
 }
 
+/* 大屏展示页 UI 缩放；默认 1×，可通过 URL ?scale=1.35 调整（仅 /screen/* 挂载 screen-display 时生效） */
+html.screen-display {
+  --screen-ui-scale: 1;
+  font-size: calc(16px * var(--screen-ui-scale));
+}
+
+html.screen-display .screen-shell {
+  padding: calc(28px * var(--screen-ui-scale));
+}
+
+html.screen-display .screen-logo {
+  border-radius: calc(24px * var(--screen-ui-scale));
+  flex-basis: calc(72px * var(--screen-ui-scale));
+  height: calc(72px * var(--screen-ui-scale));
+  width: calc(72px * var(--screen-ui-scale));
+}
+
+html.screen-display .screen-header {
+  gap: calc(16px * var(--screen-ui-scale));
+  margin-bottom: calc(20px * var(--screen-ui-scale));
+}
+
+html.screen-display .screen-hero {
+  gap: calc(24px * var(--screen-ui-scale));
+}
+
+html.screen-display .screen-brand {
+  gap: calc(18px * var(--screen-ui-scale));
+}
+
+html.screen-display .screen-toolbar {
+  gap: calc(12px * var(--screen-ui-scale));
+}
+
+html.screen-display .screen-toolbar-meta {
+  gap: calc(6px * var(--screen-ui-scale));
+}
+
+html.screen-display .screen-action-button {
+  min-height: calc(44px * var(--screen-ui-scale));
+  padding: 0 calc(18px * var(--screen-ui-scale));
+}
+
+html.screen-display .screen-control-bar {
+  border-radius: calc(24px * var(--screen-ui-scale));
+  gap: calc(16px * var(--screen-ui-scale));
+  min-height: calc(64px * var(--screen-ui-scale));
+  padding: calc(10px * var(--screen-ui-scale)) calc(14px * var(--screen-ui-scale));
+}
+
+html.screen-display .screen-page-switcher {
+  gap: calc(10px * var(--screen-ui-scale));
+}
+
+html.screen-display .screen-page-chip {
+  min-height: calc(38px * var(--screen-ui-scale));
+  padding: 0 calc(16px * var(--screen-ui-scale));
+}
+
+html.screen-display .screen-status {
+  gap: calc(10px * var(--screen-ui-scale));
+}
+
+html.screen-display .status-pill {
+  padding: calc(6px * var(--screen-ui-scale)) calc(12px * var(--screen-ui-scale));
+}
+
+html.screen-display .screen-grid {
+  gap: calc(18px * var(--screen-ui-scale));
+}
+
+html.screen-display .screen-panel {
+  border-radius: calc(18px * var(--screen-ui-scale));
+  padding: calc(18px * var(--screen-ui-scale));
+}
+
+html.screen-display .metric-tile {
+  border-radius: calc(16px * var(--screen-ui-scale));
+  min-height: calc(126px * var(--screen-ui-scale));
+  padding: calc(18px * var(--screen-ui-scale)) calc(16px * var(--screen-ui-scale));
+}
+
+html.screen-display .metric-label {
+  margin-bottom: calc(16px * var(--screen-ui-scale));
+}
+
+html.screen-display .industrial-realtime-panel {
+  border-radius: calc(14px * var(--screen-ui-scale));
+  gap: calc(14px * var(--screen-ui-scale));
+  padding: calc(16px * var(--screen-ui-scale)) calc(18px * var(--screen-ui-scale)) calc(20px * var(--screen-ui-scale));
+}
+
+html.screen-display .industrial-realtime-grid {
+  gap: calc(14px * var(--screen-ui-scale));
+}
+
+html.screen-display .cnc-device-card {
+  border-radius: calc(12px * var(--screen-ui-scale));
+  gap: calc(10px * var(--screen-ui-scale));
+  min-height: calc(300px * var(--screen-ui-scale));
+  padding: calc(14px * var(--screen-ui-scale)) calc(14px * var(--screen-ui-scale)) calc(10px * var(--screen-ui-scale));
+}
+
+html.screen-display .syntec-card--line {
+  gap: calc(10px * var(--screen-ui-scale));
+  min-height: calc(360px * var(--screen-ui-scale));
+  padding: calc(12px * var(--screen-ui-scale)) calc(12px * var(--screen-ui-scale)) calc(10px * var(--screen-ui-scale))
+    calc(16px * var(--screen-ui-scale));
+}
+
+html.screen-display .xz-line-board {
+  gap: calc(16px * var(--screen-ui-scale));
+}
+
+/* 旧 WebView 不支持 clamp() 时的字号 / 尺寸 fallback（rem 已随 html 放大） */
+html.screen-display .screen-header h1 {
+  font-size: 3rem;
+}
+
+html.screen-display .screen-subtitle {
+  font-size: 1.06rem;
+}
+
+html.screen-display .metric-value {
+  font-size: 2.6rem;
+}
+
+html.screen-display .syntec-card--line .syntec-title {
+  font-size: 0.95rem;
+}
+
+html.screen-display .syntec-card--line .syntec-meta,
+html.screen-display .syntec-card--line .syntec-state {
+  font-size: 0.72rem;
+}
+
+html.screen-display .syntec-card--line .syntec-dash-rpm-val strong {
+  font-size: 1.5rem;
+}
+
+html.screen-display .syntec-card--line .syntec-dash-load .cnc-load-ring-wrap {
+  height: calc(64px * var(--screen-ui-scale));
+  width: calc(64px * var(--screen-ui-scale));
+}
+
 .screen-shell {
   --screen-bg: #000000;
   --screen-bg-soft: rgba(9, 15, 24, 0.92);

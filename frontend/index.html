@@ -3,6 +3,19 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- 电视 WebView 常把 device-width 报成 960px，导致大屏布局挤在左侧；按物理宽度强制 viewport -->
+    <script>
+      (function () {
+        var w = Math.max(window.screen.width || 0, window.screen.height || 0, 1920);
+        var meta = document.querySelector('meta[name="viewport"]');
+        if (meta) {
+          meta.setAttribute(
+            "content",
+            "width=" + w + ", initial-scale=1.0, maximum-scale=1.0, user-scalable=no",
+          );
+        }
+      })();
+    </script>
     <meta
       name="description"
       content="和泰智造数屏系统前端，包含后台管理与大屏展示入口。"

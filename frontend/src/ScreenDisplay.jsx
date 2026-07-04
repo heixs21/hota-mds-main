@@ -1483,12 +1483,37 @@ function resolveScreenPollSeconds(screenKey, payload) {
   return DEFAULT_SCREEN_POLL_SEC;
 }
 
+const DEFAULT_SCREEN_UI_SCALE = 1;
+const MIN_SCREEN_UI_SCALE = 0.5;
+const MAX_SCREEN_UI_SCALE = 3;
+
+function resolveScreenUiScale() {
+  const raw = new URLSearchParams(window.location.search).get("scale");
+  if (raw == null || raw === "") {
+    return DEFAULT_SCREEN_UI_SCALE;
+  }
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < MIN_SCREEN_UI_SCALE || value > MAX_SCREEN_UI_SCALE) {
+    return DEFAULT_SCREEN_UI_SCALE;
+  }
+  return value;
+}
+
 function ScreenDisplay({ areaCode, screenKey }) {
   const [payload, setPayload] = useState(null);
   const [errorMessage, setErrorMessage] = useState("");
   const [pollIntervalMs, setPollIntervalMs] = useState(DEFAULT_SCREEN_POLL_SEC * 1000);
   const screenRef = useRef(null);
   const fullscreenState = useFullscreen(screenRef);
+
+  useEffect(() => {
+    document.documentElement.classList.add("screen-display");
+    document.documentElement.style.setProperty("--screen-ui-scale", String(resolveScreenUiScale()));
+    return () => {
+      document.documentElement.classList.remove("screen-display");
+      document.documentElement.style.removeProperty("--screen-ui-scale");
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
