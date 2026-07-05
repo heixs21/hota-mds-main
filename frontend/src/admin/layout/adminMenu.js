@@ -1,5 +1,6 @@
 import { ADMIN_MENU_GROUPS, resourceDefinitions } from "../../adminResources.js";
 import { resourceKeyToPath } from "../routes/resourcePaths.js";
+import { renderAdminMenuIcon } from "./adminMenuIcons.jsx";
 
 function buildLeafItem(resourceKey) {
   const definition = resourceDefinitions[resourceKey];
@@ -10,6 +11,7 @@ function buildLeafItem(resourceKey) {
   return {
     key: resourceKeyToPath(resourceKey),
     label: definition.label,
+    icon: renderAdminMenuIcon(resourceKey),
   };
 }
 
@@ -22,6 +24,7 @@ function buildGroupItem(item) {
     return {
       key: item.id,
       label: item.label,
+      icon: renderAdminMenuIcon(item.id),
       children: item.children.map((childKey) => buildLeafItem(childKey)).filter(Boolean),
     };
   }
@@ -37,6 +40,7 @@ export function buildAdminMenuItems() {
   return ADMIN_MENU_GROUPS.map((group) => ({
     key: group.id,
     label: group.label,
+    icon: renderAdminMenuIcon(group.id),
     children: group.items.map((item) => buildGroupItem(item)).filter(Boolean),
   }));
 }

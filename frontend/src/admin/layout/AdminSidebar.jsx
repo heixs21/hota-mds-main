@@ -1,15 +1,21 @@
 import { Menu } from "antd";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { buildAdminMenuItems, getAdminMenuNestedOpenKeys, getInitialAdminMenuOpenKeys } from "./adminMenu.js";
+import {
+  buildAdminMenuItems,
+  DEFAULT_ADMIN_MENU_OPEN_KEYS,
+  getAdminMenuNestedOpenKeys,
+  getInitialAdminMenuOpenKeys,
+} from "./adminMenu.js";
 import { resourceKeyToPath } from "../routes/resourcePaths.js";
 
-export default function AdminSidebar({ activeResource }) {
+export default function AdminSidebar({ activeResource, collapsed = false }) {
   const navigate = useNavigate();
   const menuItems = useMemo(() => buildAdminMenuItems(), []);
   const selectedKeys = useMemo(() => [resourceKeyToPath(activeResource)], [activeResource]);
   const [openKeys, setOpenKeys] = useState(() => getInitialAdminMenuOpenKeys(activeResource));
+  const prevCollapsedRef = useRef(collapsed);
 
   useEffect(() => {
     setOpenKeys((previous) => {
@@ -21,9 +27,19 @@ export default function AdminSidebar({ activeResource }) {
     });
   }, [activeResource]);
 
+  useEffect(() => {
+    if (prevCollapsedRef.current && !collapsed) {
+      setOpenKeys((previous) =>
+        Array.from(new Set([...previous, ...DEFAULT_ADMIN_MENU_OPEN_KEYS, ...getAdminMenuNestedOpenKeys(activeResource)])),
+      );
+    }
+    prevCollapsedRef.current = collapsed;
+  }, [activeResource, collapsed]);
+
   return (
     <div className="admin-sidebar">
       <Menu
+        inlineCollapsed={collapsed}
         items={menuItems}
         mode="inline"
         openKeys={openKeys}

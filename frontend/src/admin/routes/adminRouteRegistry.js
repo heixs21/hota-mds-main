@@ -11,7 +11,8 @@ const PAGE_LOADERS = {
   orders: () => import("../pages/OrdersPage.jsx"),
   screenPageBindings: () => import("../pages/ScreenPageBindingsPage.jsx"),
   screenConfigs: () => import("../pages/ScreenConfigsPage.jsx"),
-  pageModuleSwitches: () => import("../pages/PageModuleSwitchesPage.jsx"),
+  // 【已隐藏】pageModuleSwitches — 见 schemas/menu.js
+  // pageModuleSwitches: () => import("../pages/PageModuleSwitchesPage.jsx"),
   displayContentConfigs: () => import("../pages/DisplayContentConfigsPage.jsx"),
   runtimeParameterConfigs: () => import("../pages/RuntimeParameterConfigsPage.jsx"),
   codeMappings: () => import("../pages/CodeMappingsPage.jsx"),

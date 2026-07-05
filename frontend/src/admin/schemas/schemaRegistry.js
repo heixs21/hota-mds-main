@@ -5,6 +5,7 @@ export const FORM_FIELD_TYPES = new Set([
   "integer",
   "decimal",
   "checkbox",
+  "switch",
   "select",
   "json",
   "resourceSelect",
@@ -19,7 +20,7 @@ export const FORM_FIELD_TYPES = new Set([
 export const QUERY_FIELD_TYPES = new Set(["text", "select", "date", "resourceSelect"]);
 
 /** Column cell formatters (`formatCellValue`). */
-export const CELL_FORMATS = new Set(["cstDateTime", "idCount", "resourceLinks"]);
+export const CELL_FORMATS = new Set(["cstDateTime", "idCount", "resourceLinks", "screenKeyTag"]);
 
 /** Bulk toolbar multi-field value kinds (`runtimeParameterConfigs`). */
 export const BULK_FIELD_KINDS = new Set(["integer", "decimal"]);

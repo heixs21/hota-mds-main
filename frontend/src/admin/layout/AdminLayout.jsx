@@ -5,9 +5,11 @@ import { Outlet, useLocation } from "react-router-dom";
 
 import { DEFAULT_ADMIN_RESOURCE } from "../../adminResources.js";
 import { useAdminSession } from "../context/AdminSessionContext.jsx";
+import { useAdminTabs } from "../hooks/useAdminTabs.js";
 import { buildActiveResourceStorageKey } from "../adminUtils.js";
 import { pathToResourceKey } from "../routes/resourcePaths.js";
 import AdminSidebar from "./AdminSidebar.jsx";
+import AdminTabBar from "./AdminTabBar.jsx";
 
 const { Content, Header } = Layout;
 
@@ -16,6 +18,7 @@ export default function AdminLayout() {
   const location = useLocation();
   const [collapsed, setCollapsed] = useState(false);
   const activeResource = pathToResourceKey(location.pathname) ?? DEFAULT_ADMIN_RESOURCE;
+  const { activeKey, onTabChange, onTabEdit, tabItems } = useAdminTabs(activeResource);
 
   useEffect(() => {
     if (!currentUser?.username) {
@@ -41,7 +44,7 @@ export default function AdminLayout() {
       <Header className="admin-app-header">
         <Space direction="vertical" size={0}>
           <Typography.Title level={5} style={{ margin: 0 }}>
-            后台管理控制台
+            和泰智能制造数据展示系统管理控制台
           </Typography.Title>
           <Typography.Text type="secondary">HOTA MDS</Typography.Text>
         </Space>
@@ -63,18 +66,26 @@ export default function AdminLayout() {
           onCollapse={setCollapsed}
           width={220}
         >
-          <AdminSidebar activeResource={activeResource} />
+          <AdminSidebar activeResource={activeResource} collapsed={collapsed} />
         </Layout.Sider>
         <Content className="admin-app-content">
-          <Suspense
-            fallback={
-              <div className="admin-page-loading">
-                <Spin size="large" />
-              </div>
-            }
-          >
-            <Outlet />
-          </Suspense>
+          <AdminTabBar
+            activeKey={activeKey}
+            onTabChange={onTabChange}
+            onTabEdit={onTabEdit}
+            tabItems={tabItems}
+          />
+          <div className="admin-app-page">
+            <Suspense
+              fallback={
+                <div className="admin-page-loading">
+                  <Spin size="large" />
+                </div>
+              }
+            >
+              <Outlet />
+            </Suspense>
+          </div>
         </Content>
       </Layout>
     </Layout>

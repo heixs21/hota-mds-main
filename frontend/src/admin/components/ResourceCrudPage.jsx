@@ -1,8 +1,8 @@
 import { CopyOutlined, DeleteOutlined, EditOutlined, LinkOutlined, PlusOutlined } from "@ant-design/icons";
-import { Button, Drawer, Flex, Form, InputNumber, Modal, Popconfirm, Select, Space, Table, Typography, message } from "antd";
+import { Button, Drawer, Form, InputNumber, Modal, Popconfirm, Select, Space, Table, Typography, message } from "antd";
 import { useCallback, useMemo, useRef } from "react";
 
-import { formatCellValue, stringifyJson } from "../../adminResources.js";
+import { formatCellValue, stringifyJson, collectBooleanFieldKeys } from "../../adminResources.js";
 import { useAdminSession } from "../context/AdminSessionContext.jsx";
 import { buildRowIndexColumn } from "../adminUtils.js";
 import { useResourceCrud } from "../hooks/useResourceCrud.js";
@@ -10,6 +10,9 @@ import { useTableBodyScrollY } from "../hooks/useTableBodyScrollY.js";
 import { DeviceDetailDialog, HistoryDialog } from "../system/AdminDialogs.jsx";
 import { AntResourceModalForm } from "./AntResourceModalForm.jsx";
 import { AntResourceQueryBar } from "./AntResourceQueryBar.jsx";
+import { BooleanSwitchCell } from "./BooleanSwitchCell.jsx";
+import { ColumnTitleWithHint } from "./ColumnTitleWithHint.jsx";
+import { ScreenKeyTag } from "./ScreenKeyTag.jsx";
 
 function notifyFromAntd({ text, variant }) {
   const fn = message[variant] ?? message.info;
@@ -60,8 +63,9 @@ function buildBulkToolbarExtra(crud) {
             disabled={crud.isLoading || crud.isBulkRefreshing}
             onChange={crud.setBulkToolbarInput}
             options={bt.selectOptions ?? []}
+            placeholder={`请选择${bt.label}`}
             style={{ minWidth: 120 }}
-            value={crud.bulkToolbarInput}
+            value={crud.bulkToolbarInput || undefined}
           />
         </Form.Item>
         <Form.Item>
@@ -110,15 +114,37 @@ export default function ResourceCrudPage({ resourceKey }) {
     Boolean(resourceDefinition.bulkApplyToolbar),
   ]);
 
+  const booleanFieldKeys = useMemo(
+    () => collectBooleanFieldKeys(resourceDefinition.fields),
+    [resourceDefinition.fields],
+  );
+
   const columns = useMemo(() => {
     const nextColumns = [
       buildRowIndexColumn(crud.page, crud.pageSize),
-      ...resourceDefinition.columns.map((column) => ({
-      title: column.label,
+      ...resourceDefinition.columns.map((column) => {
+        const isBooleanColumn = booleanFieldKeys.has(column.key);
+        return {
+      title: <ColumnTitleWithHint hint={column.columnHint} label={column.label} />,
       dataIndex: column.key,
       key: column.key,
-      ellipsis: true,
+      width: column.width ?? (isBooleanColumn ? 80 : undefined),
+      align: isBooleanColumn ? "center" : undefined,
+      ellipsis: column.width ? false : !isBooleanColumn,
       render: (value, record) => {
+        if (isBooleanColumn) {
+          return (
+            <BooleanSwitchCell
+              checked={value}
+              disabled={resourceDefinition.readOnly || crud.isLoading || crud.isSaving}
+              loading={crud.isInlineBooleanPatching(record.id, column.key)}
+              onChange={(nextValue) => crud.handleInlineBooleanToggle(record, column.key, nextValue)}
+            />
+          );
+        }
+        if (column.cellFormat === "screenKeyTag") {
+          return <ScreenKeyTag value={value} />;
+        }
         if (column.cellFormat === "resourceLinks" && Array.isArray(record[column.key])) {
           if (record[column.key].length === 0) {
             return "-";
@@ -141,7 +167,8 @@ export default function ResourceCrudPage({ resourceKey }) {
         }
         return formatCellValue(value, column, record);
       },
-    })),
+    };
+      }),
     ];
 
     if (resourceDefinition.supportsHistory) {
@@ -195,76 +222,70 @@ export default function ResourceCrudPage({ resourceKey }) {
     }
 
     return nextColumns;
-  }, [crud, resourceDefinition]);
+  }, [booleanFieldKeys, crud, resourceDefinition]);
 
-  const trailingActions =
+  const secondaryActions =
     !resourceDefinition.readOnly &&
     (crud.checkedIds.size > 0 || resourceDefinition.supportsCopyAsNew) ? (
       <Space wrap>
-      {crud.checkedIds.size > 0 ? (
-        <Popconfirm
-          cancelText="取消"
-          okText="删除"
-          okType="danger"
-          onConfirm={crud.handleBatchDelete}
-          title={`确定要批量删除选中的 ${crud.checkedIds.size} 条${resourceDefinition.itemLabel}吗？`}
-        >
-          <Button danger loading={crud.isBatchDeleting}>
-            批量删除
+        {crud.checkedIds.size > 0 ? (
+          <Popconfirm
+            cancelText="取消"
+            okText="删除"
+            okType="danger"
+            onConfirm={crud.handleBatchDelete}
+            title={`确定要批量删除选中的 ${crud.checkedIds.size} 条${resourceDefinition.itemLabel}吗？`}
+          >
+            <Button danger loading={crud.isBatchDeleting}>
+              批量删除
+            </Button>
+          </Popconfirm>
+        ) : null}
+        {resourceDefinition.supportsCopyAsNew ? (
+          <Button
+            disabled={crud.isLoading || crud.isCopying || crud.checkedIds.size === 0}
+            icon={<CopyOutlined />}
+            loading={crud.isCopying}
+            onClick={() => {
+              if (crud.checkedIds.size > 1) {
+                Modal.confirm({
+                  cancelText: "取消",
+                  content: `确定要复制选中的 ${crud.checkedIds.size} 条${resourceDefinition.itemLabel}并新增吗？将自动为编码添加 _copy 后缀。`,
+                  okText: "复制新增",
+                  onOk: () => crud.handleBatchCopyAsNew(),
+                  title: "复制新增",
+                });
+                return;
+              }
+              crud.handleBatchCopyAsNew();
+            }}
+          >
+            复制新增
           </Button>
-        </Popconfirm>
-      ) : null}
-      {resourceDefinition.supportsCopyAsNew ? (
-        <Button
-          disabled={crud.isLoading || crud.isCopying || crud.checkedIds.size === 0}
-          icon={<CopyOutlined />}
-          loading={crud.isCopying}
-          onClick={() => {
-            if (crud.checkedIds.size > 1) {
-              Modal.confirm({
-                cancelText: "取消",
-                content: `确定要复制选中的 ${crud.checkedIds.size} 条${resourceDefinition.itemLabel}并新增吗？将自动为编码添加 _copy 后缀。`,
-                okText: "复制新增",
-                onOk: () => crud.handleBatchCopyAsNew(),
-                title: "复制新增",
-              });
-              return;
-            }
-            crud.handleBatchCopyAsNew();
-          }}
-        >
-          复制新增
-        </Button>
-      ) : null}
-    </Space>
+        ) : null}
+      </Space>
+    ) : null;
+
+  const primaryAction = !resourceDefinition.readOnly ? (
+    <Button icon={<PlusOutlined />} onClick={crud.handleCreateNew} type="primary">
+      新建{resourceDefinition.itemLabel}
+    </Button>
   ) : null;
 
   return (
     <section className="resource-crud-page">
-      <Flex align="center" className="resource-crud-header" justify="space-between">
-        <Typography.Title level={4} style={{ margin: 0 }}>
-          {resourceDefinition.label}
-        </Typography.Title>
-        <Space wrap>
-          {!resourceDefinition.readOnly ? (
-            <Button icon={<PlusOutlined />} onClick={crud.handleCreateNew} type="primary">
-              新建{resourceDefinition.itemLabel}
-            </Button>
-          ) : null}
-        </Space>
-      </Flex>
-
       <div className="resource-crud-body">
         <AntResourceQueryBar
           bulkToolbarExtra={buildBulkToolbarExtra(crud)}
           disabled={crud.isLoading}
           onChange={crud.handleQueryFieldChange}
+          primaryAction={primaryAction}
           onReset={crud.handleResetQuery}
           onSearch={crud.handleSearch}
           queryFields={resourceDefinition.queryFields ?? []}
           queryState={crud.queryDraft}
           relatedOptions={crud.relatedOptions}
-          trailingActions={trailingActions}
+          secondaryActions={secondaryActions}
         />
 
         <div className="resource-crud-table-wrap" ref={tableWrapRef}>

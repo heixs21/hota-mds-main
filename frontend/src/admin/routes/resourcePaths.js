@@ -56,7 +56,8 @@ export const ADMIN_RESOURCE_KEYS = [
   "orders",
   "screenPageBindings",
   "screenConfigs",
-  "pageModuleSwitches",
+  // 【已隐藏】见 frontend/src/admin/schemas/menu.js 中 pageModuleSwitches 说明
+  // "pageModuleSwitches",
   "displayContentConfigs",
   "runtimeParameterConfigs",
   "codeMappings",

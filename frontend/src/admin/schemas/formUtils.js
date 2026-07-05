@@ -15,7 +15,7 @@ export function createEmptyForm(resourceDefinition) {
     if (field.type === "json" || field.type === "screenPageTransfer") {
       const rawDefault = field.defaultValue ?? {};
       nextState[field.key] = Object.keys(rawDefault).length === 0 && field.omitIfBlank ? "" : stringifyJson(rawDefault);
-    } else if (field.type === "checkbox") {
+    } else if (field.type === "checkbox" || field.type === "switch") {
       nextState[field.key] = Boolean(field.defaultValue);
     } else if (
       field.type === "resourceMultiSelect" ||
@@ -86,7 +86,7 @@ export function createFormFromItem(resourceDefinition, item) {
       } else {
         nextState[field.key] = stringifyJson(rawValue ?? field.defaultValue ?? {});
       }
-    } else if (field.type === "checkbox") {
+    } else if (field.type === "checkbox" || field.type === "switch") {
       nextState[field.key] = Boolean(rawValue);
     } else if (field.type === "energyDatabaseEquipmentMulti") {
       if (Array.isArray(rawValue)) {
@@ -102,6 +102,8 @@ export function createFormFromItem(resourceDefinition, item) {
       } else {
         nextState[field.key] = Array.isArray(field.defaultValue) ? [...field.defaultValue] : [];
       }
+    } else if (field.type === "resourceSelect") {
+      nextState[field.key] = rawValue == null || rawValue === "" ? field.defaultValue ?? "" : String(rawValue);
     } else if (rawValue === null || rawValue === undefined) {
       nextState[field.key] = field.defaultValue ?? "";
     } else {
@@ -119,7 +121,7 @@ export function parseFieldValue(field, rawValue, fullForm) {
   if (field.type === "staticHint") {
     return OMIT_VALUE;
   }
-  if (field.type === "checkbox") {
+  if (field.type === "checkbox" || field.type === "switch") {
     return Boolean(rawValue);
   }
   if (field.type === "integer") {
@@ -205,6 +207,20 @@ function formatCstDateTime(value) {
   return `${map.year}-${map.month}-${map.day} ${map.hour}:${map.minute}:${map.second}`;
 }
 
+
+export function isBooleanField(field) {
+  return field?.type === "switch" || field?.type === "checkbox";
+}
+
+export function collectBooleanFieldKeys(fields) {
+  const keys = new Set();
+  for (const field of fields ?? []) {
+    if (isBooleanField(field)) {
+      keys.add(field.key);
+    }
+  }
+  return keys;
+}
 
 export function fieldVisibleForForm(field, formState) {
   const w = field.visibleWhen;

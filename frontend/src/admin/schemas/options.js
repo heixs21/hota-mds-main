@@ -28,6 +28,12 @@ const SCREEN_KEY_OPTIONS = [
   { value: "right", label: "右屏" },
 ];
 
+/** 列表 Tag 展示：左/右屏文案与颜色 */
+const SCREEN_KEY_TAG_MAP = {
+  left: { label: "左屏", color: "blue" },
+  right: { label: "右屏", color: "orange" },
+};
+
 const REALTIME_LAYOUT_OPTIONS = [
   { value: "", label: "自动识别" },
   { value: "siemens_boring", label: "西门子镗孔" },
@@ -102,4 +108,5 @@ export {
   ORDER_STATUS_OPTIONS,
   REALTIME_LAYOUT_OPTIONS,
   SCREEN_KEY_OPTIONS,
+  SCREEN_KEY_TAG_MAP,
 };

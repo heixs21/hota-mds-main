@@ -5,7 +5,7 @@ const DATA_SOURCE_BASE_FIELDS = [
   { key: "code", label: "编码", type: "text", required: true, defaultValue: "" },
   { key: "name", label: "名称", type: "text", required: true, defaultValue: "" },
   { key: "deviceIds", label: "绑定设备", type: "resourceMultiSelect", resource: "devices", allowBlank: true, defaultValue: [] },
-  { key: "isEnabled", label: "启用", type: "checkbox", defaultValue: true },
+  { key: "isEnabled", label: "启用", type: "switch", defaultValue: true },
   {
     key: "refreshIntervalSeconds",
     label: "轮询间隔（秒）",

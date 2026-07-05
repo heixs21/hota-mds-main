@@ -10,7 +10,7 @@
  */
 
 /**
- * @typedef {'cstDateTime'|'idCount'|'resourceLinks'} CellFormat
+ * @typedef {'cstDateTime'|'idCount'|'resourceLinks'|'screenKeyTag'} CellFormat
  */
 
 /**
@@ -21,6 +21,8 @@
  * @property {CellFormat} [cellFormat]
  * @property {string} [resource] Required when `cellFormat` is `resourceLinks`.
  * @property {string} [showWhenPageKey]
+ * @property {number} [width] Table column width in px.
+ * @property {string} [columnHint] Tooltip shown beside the column header label.
  */
 
 /**
@@ -43,6 +45,8 @@
  * @property {string} [storage] Nested object key, e.g. `connectionConfig`.
  * @property {boolean} [omitIfBlank]
  * @property {boolean} [hideInForm]
+ * @property {boolean} [collapseByDefault] 表单内默认折叠（需配合 json/textarea）；点击标题展开编辑。
+ * @property {string} [collapseHint] 折叠面板展开后的说明文字。
  * @property {VisibleWhen} [visibleWhen]
  * @property {string} [screenKeyField]
  * @property {string} [areaIdField]
@@ -79,6 +83,12 @@
  */
 
 /**
+ * @typedef {Object} ModalFormSection
+ * @property {number} [columns=2] Ant Design grid columns per row (24 / columns = Col span).
+ * @property {string[]} fieldKeys Field keys laid out row-by-row in column order.
+ */
+
+/**
  * @typedef {Object} ResourceDefinition
  * @property {string} label Page title.
  * @property {string} endpoint REST list root, e.g. `/api/admin/devices`.
@@ -89,6 +99,8 @@
  * @property {boolean} [useModalForm]
  * @property {boolean} [readOnly]
  * @property {boolean} [wideModal]
+ * @property {number} [modalWidth]
+ * @property {ModalFormSection[]} [modalFormSections]
  * @property {string[]} [relatedResources]
  * @property {Record<string, string>} [fixedListParams]
  * @property {string} [fixedSourceType]

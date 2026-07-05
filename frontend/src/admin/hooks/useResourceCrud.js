@@ -90,6 +90,7 @@ export function useResourceCrud({ notify, onUnauthorized, resourceKey, token }) 
   const [isBulkRefreshing, setIsBulkRefreshing] = useState(false);
   const [checkedIds, setCheckedIds] = useState(() => new Set());
   const [modalState, setModalState] = useState(null);
+  const [inlinePatchKeys, setInlinePatchKeys] = useState(() => new Set());
   const [historyTarget, setHistoryTarget] = useState(null);
   const [deviceDetail, setDeviceDetail] = useState(null);
   const loadVersionRef = useRef(0);
@@ -402,6 +403,52 @@ export function useResourceCrud({ notify, onUnauthorized, resourceKey, token }) 
       }
     },
     [modalState, persistFormState],
+  );
+
+  const isInlineBooleanPatching = useCallback(
+    (recordId, fieldKey) => inlinePatchKeys.has(`${recordId}:${fieldKey}`),
+    [inlinePatchKeys],
+  );
+
+  const handleInlineBooleanToggle = useCallback(
+    async (record, fieldKey, nextValue) => {
+      if (!record?.id || resourceDefinition.readOnly) {
+        return;
+      }
+
+      const patchKey = `${record.id}:${fieldKey}`;
+      const previousValue = record[fieldKey];
+
+      setInlinePatchKeys((current) => new Set(current).add(patchKey));
+      setItems((current) =>
+        current.map((item) => (item.id === record.id ? { ...item, [fieldKey]: nextValue } : item)),
+      );
+
+      try {
+        await apiRequest(`${resourceDefinition.endpoint}/${record.id}`, {
+          method: "PATCH",
+          token,
+          body: { [fieldKey]: nextValue },
+        });
+      } catch (error) {
+        setItems((current) =>
+          current.map((item) => (item.id === record.id ? { ...item, [fieldKey]: previousValue } : item)),
+        );
+        if (handleUnauthorized(error)) {
+          return;
+        }
+        showToast(humanizeAdminApiError(error, resourceDefinition.fields, { fallback: "更新失败，请稍后重试。" }), {
+          variant: httpErrorToastVariant(error.status),
+        });
+      } finally {
+        setInlinePatchKeys((current) => {
+          const next = new Set(current);
+          next.delete(patchKey);
+          return next;
+        });
+      }
+    },
+    [handleUnauthorized, resourceDefinition, showToast, token],
   );
 
   const handleTestConnection = useCallback(
@@ -827,6 +874,8 @@ export function useResourceCrud({ notify, onUnauthorized, resourceKey, token }) 
     handleBulkToolbarApply,
     handlePageChange,
     handleModalSubmit,
+    handleInlineBooleanToggle,
+    isInlineBooleanPatching,
     handleTestConnection,
     handleTestConnectionByItem: (item) => {
       if (!item) {

@@ -1,18 +1,21 @@
 import { Button, DatePicker, Form, Input, Select, Space } from "antd";
 import dayjs from "dayjs";
 
+import { buildSelectPlaceholder } from "../adminUtils.js";
+
 export function AntResourceQueryBar({
   bulkToolbarExtra,
   disabled,
   onChange,
+  primaryAction,
   onReset,
   onSearch,
   queryFields,
   queryState,
   relatedOptions,
-  trailingActions,
+  secondaryActions,
 }) {
-  if (!queryFields?.length && !bulkToolbarExtra && !trailingActions) {
+  if (!queryFields?.length && !bulkToolbarExtra && !secondaryActions && !primaryAction) {
     return null;
   }
 
@@ -41,7 +44,8 @@ export function AntResourceQueryBar({
             allowClear
             disabled={disabled}
             onChange={(nextValue) => onChange(field.key, nextValue ?? "")}
-            options={[{ value: "", label: "全部" }, ...(field.options ?? [])]}
+            options={field.options ?? []}
+            placeholder={buildSelectPlaceholder(field, { query: true })}
             style={{ minWidth: 140 }}
             value={value || undefined}
           />
@@ -57,16 +61,15 @@ export function AntResourceQueryBar({
             allowClear
             disabled={disabled}
             onChange={(nextValue) => onChange(field.key, nextValue ?? "")}
-            options={[
-              { value: "", label: "全部" },
-              ...options.map((option) => ({
-                value: String(option.id),
-                label: option.code ? `${option.code} - ${option.name}` : option.name,
-              })),
-            ]}
+            options={options.map((option) => ({
+              value: String(option.id),
+              label: option.code ? `${option.code} - ${option.name}` : option.name,
+            }))}
+            optionFilterProp="label"
+            placeholder={buildSelectPlaceholder(field, { query: true })}
             showSearch
             style={{ minWidth: 180 }}
-            value={value || undefined}
+            value={value == null || value === "" ? undefined : String(value)}
           />
         </Form.Item>
       );
@@ -93,9 +96,10 @@ export function AntResourceQueryBar({
         {bulkToolbarExtra}
         <Form.Item>
           <Space wrap>
+            {secondaryActions}
             {queryFields?.length ? (
               <>
-                <Button disabled={disabled} onClick={onSearch} type="primary">
+                <Button disabled={disabled} onClick={onSearch} type="default">
                   查询
                 </Button>
                 <Button disabled={disabled} onClick={onReset}>
@@ -103,7 +107,7 @@ export function AntResourceQueryBar({
                 </Button>
               </>
             ) : null}
-            {trailingActions}
+            {primaryAction}
           </Space>
         </Form.Item>
       </Form>

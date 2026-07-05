@@ -1,8 +1,9 @@
-import { Alert, Checkbox, Form, Input, InputNumber, Select, Spin, Typography } from "antd";
+import { Alert, Checkbox, Collapse, Form, Input, InputNumber, Select, Spin, Switch, Typography } from "antd";
 import { useEffect, useMemo, useState } from "react";
 
 import { ADMIN_TOKEN_STORAGE_KEY, apiRequest } from "../adminApi.js";
 import { fieldVisibleForForm } from "../adminResources.js";
+import { buildSelectPlaceholder } from "./adminUtils.js";
 import { ScreenPageTransferField } from "./screen/ScreenPageTransferField.jsx";
 
 function matchesVisibleWhen(field, formState) {
@@ -29,7 +30,7 @@ function ResourceMultiSelectField({ emptyHint, extra, label, onChange, options, 
         onChange={(nextValues) => onChange(nextValues ?? [])}
         optionFilterProp="label"
         options={selectOptions}
-        placeholder={options.length === 0 ? emptyHint : "请选择"}
+        placeholder={options.length === 0 ? emptyHint : label ? `请选择${label}` : "请选择"}
         showSearch
         style={{ width: "100%" }}
         value={selectedValues}
@@ -76,15 +77,55 @@ export function ResourceField({ field, formState, setFormState, relatedOptions }
     );
   }
 
-  if (field.type === "textarea" || field.type === "json") {
+  if (field.type === "switch") {
     return (
-      <Form.Item label={field.label}>
-        <Input.TextArea
-          onChange={(event) => updateValue(event.target.value)}
-          placeholder={field.placeholder ?? ""}
-          rows={field.type === "json" ? 6 : 4}
-          value={value ?? ""}
+      <Form.Item label={field.label} valuePropName="checked">
+        <Switch checked={Boolean(value)} onChange={updateValue} />
+      </Form.Item>
+    );
+  }
+
+  if (field.type === "textarea" || field.type === "json") {
+    const rows = field.type === "json" ? 6 : 4;
+    const textArea = (
+      <Input.TextArea
+        onChange={(event) => updateValue(event.target.value)}
+        placeholder={field.placeholder ?? ""}
+        rows={rows}
+        value={value ?? ""}
+      />
+    );
+
+    if (field.collapseByDefault) {
+      return (
+        <Collapse
+          bordered={false}
+          className="resource-field-collapse"
+          items={[
+            {
+              key: field.key,
+              label: field.label,
+              children: (
+                <>
+                  {field.collapseHint ? (
+                    <Typography.Paragraph style={{ marginBottom: 8 }} type="secondary">
+                      {field.collapseHint}
+                    </Typography.Paragraph>
+                  ) : null}
+                  <Form.Item extra={field.extra} style={{ marginBottom: 0 }}>
+                    {textArea}
+                  </Form.Item>
+                </>
+              ),
+            },
+          ]}
         />
+      );
+    }
+
+    return (
+      <Form.Item extra={field.extra} label={field.label}>
+        {textArea}
       </Form.Item>
     );
   }
@@ -93,9 +134,11 @@ export function ResourceField({ field, formState, setFormState, relatedOptions }
     return (
       <Form.Item label={field.label}>
         <Select
+          allowClear={Boolean(field.allowBlank)}
           onChange={(nextValue) => updateValue(nextValue ?? "")}
           options={field.options ?? []}
-          value={value ?? ""}
+          placeholder={buildSelectPlaceholder(field)}
+          value={value === "" || value == null ? undefined : value}
         />
       </Form.Item>
     );
@@ -103,17 +146,17 @@ export function ResourceField({ field, formState, setFormState, relatedOptions }
 
   if (field.type === "resourceSelect") {
     const options = relatedOptions[field.resource] ?? [];
+    const selectedValue = value == null || value === "" ? undefined : String(value);
     return (
       <Form.Item label={field.label}>
         <Select
           allowClear={field.allowBlank}
           onChange={(nextValue) => updateValue(nextValue ?? "")}
-          options={[
-            ...(field.allowBlank ? [{ value: "", label: "不设置" }] : [{ value: "", label: "请选择", disabled: true }]),
-            ...toResourceSelectOptions(options),
-          ]}
+          optionFilterProp="label"
+          options={toResourceSelectOptions(options)}
+          placeholder={buildSelectPlaceholder(field)}
           showSearch
-          value={value ?? ""}
+          value={selectedValue}
         />
       </Form.Item>
     );

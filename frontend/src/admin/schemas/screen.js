@@ -13,7 +13,7 @@ export const screenResourceDefinitions = {
     endpoint: "/api/admin/screen-configs",
     itemLabel: "屏幕配置",
     useModalForm: true,
-    wideModal: true,
+    modalWidth: 840,
     bulkApplyToolbar: {
       apiPath: "bulk-rotation-interval",
       valueKey: "rotationIntervalSeconds",
@@ -25,9 +25,15 @@ export const screenResourceDefinitions = {
       errorFallback: "批量设置轮播时长失败，请稍后重试。",
     },
     relatedResources: ["screenPageBindings"],
+    modalFormSections: [
+      {
+        columns: 2,
+        fieldKeys: ["areaId", "screenKey", "title", "subtitle", "rotationIntervalSeconds", "isActive"],
+      },
+    ],
     columns: [
       { key: "areaName", label: "区域" },
-      { key: "screenKey", label: "屏幕" },
+      { key: "screenKey", label: "屏幕", cellFormat: "screenKeyTag" },
       { key: "title", label: "标题" },
       { key: "rotationIntervalSeconds", label: "轮播时长（秒）" },
       { key: "isActive", label: "启用" },
@@ -48,8 +54,8 @@ export const screenResourceDefinitions = {
         defaultValue: "left",
         options: SCREEN_KEY_OPTIONS,
       },
-      { key: "title", label: "标题", type: "text", required: true, defaultValue: "" },
-      { key: "subtitle", label: "副标题", type: "text", defaultValue: "" },
+      { key: "title", label: "标题", type: "text", required: true, defaultValue: "", placeholder: "例如：左屏综合运行展示" },
+      { key: "subtitle", label: "副标题", type: "text", defaultValue: "", placeholder: "例如：外部参观综合运行视图" },
       { key: "rotationIntervalSeconds", label: "轮播时长（秒）", type: "integer", required: true, defaultValue: 60 },
       {
         key: "pageOrder",
@@ -59,9 +65,37 @@ export const screenResourceDefinitions = {
         areaIdField: "areaId",
         defaultValue: [],
       },
-      { key: "moduleSettings", label: "模块开关", type: "json", defaultValue: {} },
-      { key: "themeSettings", label: "主题配置", type: "json", defaultValue: {} },
-      { key: "isActive", label: "启用", type: "checkbox", defaultValue: true },
+      /*
+       * 【已隐藏】moduleSettings（模块开关 JSON）
+       *
+       * 隐藏原因：控制「子页面内部区块」显隐（如 deviceOverview、productionTrend）；
+       * 空对象 {} 等价于全部开启，与当前「不做区块级开关」的产品策略一致。
+       *
+       * 大屏仍会从 ScreenConfig.module_settings 读取该字段；未配置时前端 isModuleEnabled 默认全开。
+       * 隐藏仅指后台表单不再暴露 JSON 编辑，不影响现有展示。
+       *
+       * 后期若需恢复表单编辑：取消下行注释即可。
+       * 若需结构化 UI：可新增 moduleSettings 专用表单组件，或恢复「页面模块开关」菜单并接入展示 API。
+       *
+       * 常用键（左屏）：deviceOverview, productionOverview, productionTrend, energyOverview,
+       *   repairPlaceholder, deviceRealtimeMonitor
+       * 常用键（右屏）：schedule, delayLegend, simulationPlaceholder
+       * 设为 false 隐藏对应区块，示例：{ "repairPlaceholder": false }
+       *
+       * 参见：frontend/src/ScreenDisplay.jsx（isModuleEnabled）、SCREEN_API.md
+       */
+      // { key: "moduleSettings", label: "模块开关", type: "json", defaultValue: {} },
+      {
+        key: "themeSettings",
+        label: "主题配置",
+        type: "json",
+        defaultValue: {},
+        collapseByDefault: true,
+        collapseHint:
+          "预留扩展字段，当前大屏前端尚未读取 themeSettings；一般保持 {} 即可。后期若支持按屏定制主题，在此配置 JSON 并接入 ScreenDisplay。",
+        placeholder: "{}",
+      },
+      { key: "isActive", label: "启用", type: "switch", defaultValue: true },
       ...RESERVED_FIELDS,
     ],
   },
@@ -87,6 +121,17 @@ export const screenResourceDefinitions = {
     endpoint: "/api/admin/screen-page-bindings",
     itemLabel: "子页面",
     useModalForm: true,
+    modalWidth: 840,
+    modalFormSections: [
+      {
+        columns: 2,
+        fieldKeys: ["areaId", "screenKey", "pageKey", "bindingSourceType", "isEnabled"],
+      },
+      {
+        columns: 2,
+        fieldKeys: ["realtimeLayout", "realtimeDemoMode"],
+      },
+    ],
     bulkApplyToolbar: {
       apiPath: "bulk-set-enabled",
       inputKind: "booleanSelect",
@@ -105,10 +150,20 @@ export const screenResourceDefinitions = {
       { key: "bindingScopeLabel", label: "屏幕（区域）" },
       { key: "pageKeyLabel", label: "子页面" },
       { key: "bindingSourceType", label: "数据源类型", options: DATA_SOURCE_BINDING_CATEGORY_OPTIONS },
-      { key: "dataSourceIds", label: "数据源", cellFormat: "idCount" },
+      {
+        key: "dataSourceIds",
+        label: "数据源",
+        cellFormat: "idCount",
+        columnHint: "指定子页面接入的外部数据源，可多选；需先选择数据源类型。",
+      },
       { key: "realtimeLayout", label: "实时监控模板", options: REALTIME_LAYOUT_OPTIONS, showWhenPageKey: "realtime" },
-      { key: "realtimeDemoMode", label: "展示模式", showWhenPageKey: "realtime" },
-      { key: "energyEquipmentIds", label: "能耗表计", cellFormat: "idCount" },
+      { key: "realtimeDemoMode", label: "使用演示数据", showWhenPageKey: "realtime", width: 128 },
+      {
+        key: "energyEquipmentIds",
+        label: "能耗表计",
+        cellFormat: "idCount",
+        columnHint: "能耗页展示的电表/设备（platform_equipment）；留空则默认显示进线柜。",
+      },
       { key: "isEnabled", label: "启用" },
     ],
     queryFields: [
@@ -168,8 +223,8 @@ export const screenResourceDefinitions = {
       },
       {
         key: "realtimeDemoMode",
-        label: "展示模式（全部在线演示数据）",
-        type: "checkbox",
+        label: "使用演示数据（不连接现场设备，全部显示在线演示数据）",
+        type: "switch",
         defaultValue: true,
         visibleWhen: { field: "pageKey", value: "realtime" },
       },
@@ -191,11 +246,15 @@ export const screenResourceDefinitions = {
         defaultValue: [],
         visibleWhen: { field: "pageKey", value: "energy" },
       },
-      { key: "isEnabled", label: "启用", type: "checkbox", defaultValue: true },
-      { key: "notes", label: "备注", type: "textarea", defaultValue: "" },
+      { key: "isEnabled", label: "启用", type: "switch", defaultValue: true },
+      { key: "notes", label: "备注", type: "textarea", defaultValue: "", placeholder: "选填，绑定说明或备注" },
       ...RESERVED_FIELDS,
     ],
   },
+  /*
+   * 【已隐藏】pageModuleSwitches — 页面模块开关（独立 CRUD）
+   * 与 menu.js 中注释说明一致；恢复时取消整块注释，并同步 resourcePaths / adminRouteRegistry。
+   *
   pageModuleSwitches: {
     label: "页面模块开关",
     endpoint: "/api/admin/page-module-switches",
@@ -230,6 +289,7 @@ export const screenResourceDefinitions = {
       ...RESERVED_FIELDS,
     ],
   },
+  */
   displayContentConfigs: {
     label: "欢迎展示配置",
     endpoint: "/api/admin/display-content-configs",
@@ -253,7 +313,7 @@ export const screenResourceDefinitions = {
       { key: "welcomeMessage", label: "欢迎语", type: "text", required: true, defaultValue: "" },
       { key: "logoUrl", label: "Logo 地址", type: "text", defaultValue: "" },
       { key: "promoImageUrls", label: "宣传图片地址列表", type: "json", defaultValue: [] },
-      { key: "isActive", label: "启用", type: "checkbox", defaultValue: true },
+      { key: "isActive", label: "启用", type: "switch", defaultValue: true },
       ...RESERVED_FIELDS,
     ],
   },

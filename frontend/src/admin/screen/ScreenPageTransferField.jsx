@@ -33,11 +33,14 @@ export function ScreenPageTransferField({ field, formState, setFormState, relate
     validKeys = [];
   }
 
-  const targetKeys = parseScreenPageTargetKeys(formState[field.key], validKeys, screenKey);
-  const dataSource = validKeys.map((key) => ({
+  const selectedKeys = parseScreenPageTargetKeys(formState[field.key], validKeys, screenKey);
+  const unselectedKeys = validKeys.filter((key) => !selectedKeys.includes(key));
+  const orderedKeys = [...selectedKeys, ...unselectedKeys];
+  const dataSource = orderedKeys.map((key) => ({
     key,
     title: options[key] ?? key,
   }));
+  const transferTargetKeys = unselectedKeys;
 
   useEffect(() => {
     const normalized = parseScreenPageTargetKeys(formState[field.key], validKeys, screenKey);
@@ -63,9 +66,10 @@ export function ScreenPageTransferField({ field, formState, setFormState, relate
     }));
   }
 
-  function handleChange(nextTargetKeys) {
+  function handleChange(nextTransferTargetKeys) {
     const defaults = screenKey === "right" ? ["schedule"] : ["overview"];
-    const filtered = nextTargetKeys.filter((key) => validKeys.includes(key));
+    const nextSelected = orderedKeys.filter((key) => !nextTransferTargetKeys.includes(key));
+    const filtered = nextSelected.filter((key) => validKeys.includes(key));
     commitTargetKeys(filtered.length > 0 ? filtered : defaults);
   }
 
@@ -78,7 +82,7 @@ export function ScreenPageTransferField({ field, formState, setFormState, relate
       className="screen-page-transfer"
       extra={
         <Typography.Text type="secondary">
-          右侧为轮播顺序。备选项仅来自「屏幕子页面」中同一区域的绑定；01 与 05 需分别新建，互不影响。
+          左侧为轮播顺序。备选项仅来自「屏幕子页面」中同一区域的绑定；01 与 05 需分别新建，互不影响。
         </Typography.Text>
       }
       label={field.label}
@@ -97,8 +101,8 @@ export function ScreenPageTransferField({ field, formState, setFormState, relate
         oneWay={false}
         render={(item) => item.title}
         showSearch
-        targetKeys={targetKeys}
-        titles={["备选项", "已选项（轮播顺序）"]}
+        targetKeys={transferTargetKeys}
+        titles={["已选项（轮播顺序）", "备选项"]}
       />
     </Form.Item>
   );
