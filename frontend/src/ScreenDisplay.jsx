@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 
 import { EnergyDashboardBoard } from "./EnergyDashboardBoard.jsx";
-import { RealtimeDeviceCard } from "./screen/realtime/RealtimeCards.jsx";
+import { DeviceRealtimePagedGrid } from "./screen/realtime/DeviceRealtimePagedGrid.jsx";
 import { TaotongGunziLineRealtimeBoard } from "./screen/realtime/TaotongGunziLineBoard.jsx";
 import { XiaozhouLineRealtimeBoard } from "./screen/realtime/XiaozhouLineBoard.jsx";
 import { ScreenCarouselPageContext } from "./screenCarouselContext.jsx";
@@ -605,22 +605,29 @@ function ScreenHeader({
           </div>
           <div className="screen-brand-copy">
             <p className="screen-tag">HOTA MDS</p>
-            <h1>{screen.title || "和泰智造数屏系统"}</h1>
+            <h1>{screen.title || "和泰智能制造数据看板"}</h1>
             <p className="screen-subtitle">{subtitle}</p>
           </div>
         </div>
 
         <div className="screen-toolbar">
           <div className="screen-toolbar-meta">
-            <strong>{welcome.companyName || "和泰智造"}</strong>
+            <strong>{welcome.companyName || "和泰链运机械智能制造有限公司"}</strong>
             <span>{formatDateTime(currentTime.toISOString())}</span>
-            <span className="screen-toolbar-hint">双击画面或点击按钮进入全屏</span>
+            {/* screen-action-button screen-toolbar-layout-reserved：作用为隐藏该内容 */}
+            <span aria-hidden="true" className="screen-toolbar-hint screen-toolbar-layout-reserved">
+              双击画面或点击按钮进入全屏
+            </span>
           </div>
-          {canFullscreen ? (
-            <button className="screen-action-button" onClick={onToggleFullscreen} type="button">
-              {isFullscreen ? "退出全屏" : "进入全屏"}
-            </button>
-          ) : null}
+          <button
+            aria-hidden="true"
+            className="screen-action-button screen-toolbar-layout-reserved"
+            disabled
+            tabIndex={-1}
+            type="button"
+          >
+            进入全屏
+          </button>
         </div>
       </div>
 
@@ -897,6 +904,7 @@ function LeftScreen({ payload, errorMessage, fullscreenState, screenRef }) {
       <DeviceRealtimeSection
         key="deviceRealtimeMonitor"
         drm={drm}
+        rotationIntervalSeconds={screen.rotationIntervalSeconds}
         alarmPulseDismissed={alarmPulseDismissed}
         setAlarmPulseDismissed={setAlarmPulseDismissed}
       />
@@ -971,7 +979,7 @@ function LeftScreen({ payload, errorMessage, fullscreenState, screenRef }) {
   );
 }
 
-function DeviceRealtimeSection({ drm, alarmPulseDismissed, setAlarmPulseDismissed }) {
+function DeviceRealtimeSection({ drm, rotationIntervalSeconds, alarmPulseDismissed, setAlarmPulseDismissed }) {
   if (drm.realtimeLayout === "xiaozhou_line") {
     return (
       <XiaozhouLineRealtimeBoard
@@ -995,29 +1003,13 @@ function DeviceRealtimeSection({ drm, alarmPulseDismissed, setAlarmPulseDismisse
   }
 
   return (
-    <section className="screen-panel panel-span-12 panel-unbounded industrial-realtime-panel" key="deviceRealtimeMonitor">
-      <div className="industrial-realtime-grid">
-        {(drm.cards ?? []).map((card) => {
-          const pulseOn = Boolean(card.machineStatus?.alarmActive) && !alarmPulseDismissed.has(card.sourceCode);
-          return (
-            <RealtimeDeviceCard
-              key={card.sourceCode}
-              card={card}
-              pulseOn={pulseOn}
-              formatDateTime={formatDateTime}
-              onDismissAlarm={() => {
-                if (card.machineStatus?.alarmActive) {
-                  setAlarmPulseDismissed((prev) => new Set(prev).add(card.sourceCode));
-                }
-              }}
-            />
-          );
-        })}
-        {(drm.cards ?? []).length === 0 ? (
-          <SectionEmpty title="当前暂无可监控 OPC UA 设备" description="请在数据源配置中绑定设备并配置节点列表（含 TK.MD 数据点）。" />
-        ) : null}
-      </div>
-    </section>
+    <DeviceRealtimePagedGrid
+      alarmPulseDismissed={alarmPulseDismissed}
+      cards={drm.cards ?? []}
+      formatDateTime={formatDateTime}
+      rotationIntervalSeconds={rotationIntervalSeconds}
+      setAlarmPulseDismissed={setAlarmPulseDismissed}
+    />
   );
 }
 
@@ -1342,6 +1334,7 @@ function RightScreen({ payload, errorMessage, fullscreenState, screenRef }) {
       <DeviceRealtimeSection
         key="deviceRealtimeMonitor"
         drm={drm}
+        rotationIntervalSeconds={screen.rotationIntervalSeconds}
         alarmPulseDismissed={alarmPulseDismissed}
         setAlarmPulseDismissed={setAlarmPulseDismissed}
       />
@@ -1477,7 +1470,7 @@ function ScreenFallback({ areaCode, screenKey, errorMessage }) {
 }
 
 const DEFAULT_SCREEN_POLL_SEC = 30;
-const REALTIME_POLL_FLOOR_SEC = 2;
+const REALTIME_POLL_FLOOR_SEC = 5;
 
 function resolveScreenPollSeconds(screenKey, payload) {
   const pageKeys = payload?.screen?.pageKeys ?? [];

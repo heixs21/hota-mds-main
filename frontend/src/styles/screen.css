@@ -72,7 +72,20 @@ html.screen-display .screen-status {
 }
 
 html.screen-display .status-pill {
+  font-size: calc(0.82rem * var(--screen-ui-scale));
   padding: calc(6px * var(--screen-ui-scale)) calc(12px * var(--screen-ui-scale));
+}
+
+html.screen-display .status-pill.ok {
+  color: #032816;
+}
+
+html.screen-display .status-pill.warning {
+  color: #3a2800;
+}
+
+html.screen-display .status-pill.danger {
+  color: #3a0808;
 }
 
 html.screen-display .screen-grid {
@@ -123,6 +136,16 @@ html.screen-display .xz-line-board {
 }
 
 /* 旧 WebView 不支持 clamp() 时的字号 / 尺寸 fallback（rem 已随 html 放大） */
+html.screen-display .industrial-realtime-paged-slot > .cnc-device-card,
+html.screen-display .industrial-realtime-paged-slot > .syntec-card {
+  min-height: 0;
+}
+
+html.screen-display .industrial-realtime-page-dot {
+  height: calc(10px * var(--screen-ui-scale));
+  width: calc(10px * var(--screen-ui-scale));
+}
+
 html.screen-display .screen-header h1 {
   font-size: 3rem;
 }
@@ -307,7 +330,7 @@ html.screen-display .syntec-card--line .syntec-dash-load .cnc-load-ring-wrap {
 
 .screen-toolbar-meta span,
 .panel-header span,
-.screen-status span,
+.screen-status > span:not(.status-pill),
 .line-summary-item span,
 .energy-item span,
 .status-row span,
@@ -319,6 +342,12 @@ html.screen-display .syntec-card--line .syntec-dash-load .cnc-load-ring-wrap {
 .placeholder-copy p,
 .screen-toolbar-hint {
   color: var(--screen-muted);
+}
+
+/* 隐藏全屏提示/按钮，但保留占位，避免 toolbar 变矮导致 meta 随 align-items:end 下移 */
+.screen-toolbar-layout-reserved {
+  pointer-events: none;
+  visibility: hidden;
 }
 
 .screen-action-button {
@@ -391,22 +420,28 @@ html.screen-display .syntec-card--line .syntec-dash-load .cnc-load-ring-wrap {
 
 .status-pill {
   border-radius: 999px;
-  color: #061018;
   font-size: 0.82rem;
   font-weight: 700;
+  line-height: 1.25;
   padding: 6px 12px;
 }
 
 .status-pill.ok {
-  background: #73f0c2;
+  background: #5be7a4;
+  border: 1px solid rgba(3, 48, 28, 0.35);
+  color: #032816;
 }
 
 .status-pill.warning {
   background: #ffbf5f;
+  border: 1px solid rgba(58, 40, 0, 0.35);
+  color: #3a2800;
 }
 
 .status-pill.danger {
   background: #ff7b7b;
+  border: 1px solid rgba(58, 8, 8, 0.35);
+  color: #3a0808;
 }
 
 .screen-page {
@@ -1194,49 +1229,162 @@ html.screen-display .syntec-card--line .syntec-dash-load .cnc-load-ring-wrap {
   display: none !important;
 }
 
-.screen-grid-left-realtime {
-  display: block;
-  height: auto;
-  min-height: 0;
-  overflow-y: auto;
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-}
-
-.screen-grid-left-realtime::-webkit-scrollbar {
-  width: 0 !important;
-  height: 0 !important;
-}
-
+/* ── realtime page full-height container（占满 header 以下可视区，card 分页网格）── */
+.screen-grid-left-realtime,
 .screen-grid-realtime {
-  display: block;
-  height: auto;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  height: 100%;
   min-height: 0;
-  overflow-y: auto;
-  scrollbar-width: none;
-  -ms-overflow-style: none;
+  overflow: hidden;
 }
 
-.screen-grid-realtime::-webkit-scrollbar {
-  width: 0 !important;
-  height: 0 !important;
-}
-
-.screen-grid-left-realtime .industrial-realtime-grid,
-.screen-grid-realtime .industrial-realtime-grid {
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-}
-
-.screen-grid-left-realtime .industrial-realtime-grid::-webkit-scrollbar,
-.screen-grid-realtime .industrial-realtime-grid::-webkit-scrollbar {
-  width: 0 !important;
-  height: 0 !important;
+.screen-grid-left-realtime .screen-panel.panel-unbounded,
+.screen-grid-realtime .screen-panel.panel-unbounded {
+  box-sizing: border-box;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  height: 100%;
+  max-height: 100%;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .screen-grid-left-realtime .industrial-realtime-panel,
 .screen-grid-realtime .industrial-realtime-panel {
-  min-height: calc(100vh - 240px);
+  flex: 1 1 auto;
+  height: 100%;
+  max-height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.screen-grid-left-realtime .industrial-realtime-panel--paged,
+.screen-grid-realtime .industrial-realtime-panel--paged {
+  gap: 0;
+  padding-bottom: 12px;
+}
+
+.industrial-realtime-paged-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.industrial-realtime-paged-grid {
+  align-items: stretch;
+  box-sizing: border-box;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(var(--realtime-paged-cols, 1), minmax(0, 1fr));
+  height: 100%;
+  min-height: 0;
+}
+
+.industrial-realtime-paged-slot {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+
+.industrial-realtime-paged-slot > .cnc-device-card,
+.industrial-realtime-paged-slot > .syntec-card {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  height: 100%;
+  max-height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.industrial-realtime-paged-slot .cnc-device-head,
+.industrial-realtime-paged-slot .syntec-head,
+.industrial-realtime-paged-slot .cnc-job-footer,
+.industrial-realtime-paged-slot .cnc-device-foot-meta,
+.industrial-realtime-paged-slot .syntec-foot,
+.industrial-realtime-paged-slot .syntec-prog,
+.industrial-realtime-paged-slot .syntec-tags,
+.industrial-realtime-paged-slot .syntec-alarm-text {
+  flex-shrink: 0;
+}
+
+.industrial-realtime-paged-slot .cnc-machine-split,
+.industrial-realtime-paged-slot .cnc-spindle-row,
+.industrial-realtime-paged-slot .cnc-param-grid,
+.industrial-realtime-paged-slot .syntec-dash {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.industrial-realtime-paged-slot .cnc-machine-split::-webkit-scrollbar,
+.industrial-realtime-paged-slot .cnc-spindle-row::-webkit-scrollbar,
+.industrial-realtime-paged-slot .cnc-param-grid::-webkit-scrollbar,
+.industrial-realtime-paged-slot .syntec-dash::-webkit-scrollbar {
+  display: none;
+}
+
+.industrial-realtime-paged-slot .syntec-alarm-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.industrial-realtime-page-dots {
+  align-items: center;
+  display: flex;
+  flex-shrink: 0;
+  gap: 10px;
+  justify-content: center;
+  padding: 10px 0 2px;
+}
+
+.industrial-realtime-page-dot {
+  appearance: none;
+  background: rgba(255, 255, 255, 0.28);
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  display: block;
+  height: 10px;
+  margin: 0;
+  padding: 0;
+  width: 10px;
+}
+
+.industrial-realtime-page-dot.active {
+  background: var(--screen-cyan);
+  box-shadow: 0 0 10px rgba(108, 230, 255, 0.45);
+  cursor: default;
+}
+
+.industrial-realtime-page-dot:not(.active):hover {
+  background: rgba(108, 230, 255, 0.55);
+}
+
+.screen-grid-left-realtime .xz-line-panel,
+.screen-grid-realtime .xz-line-panel,
+.screen-grid-left-realtime .ttgz-line-panel,
+.screen-grid-realtime .ttgz-line-panel {
+  flex: 1 1 auto;
+  height: 100%;
+  max-height: 100%;
+  min-height: 0;
+}
+
+.screen-grid-left-realtime .xz-line-board,
+.screen-grid-realtime .xz-line-board,
+.screen-grid-left-realtime .ttgz-line-board,
+.screen-grid-realtime .ttgz-line-board {
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 /* ── energy page full-height container（占满 header 以下可视区，内部区域滚动）── */
@@ -2804,17 +2952,6 @@ html.screen-display .syntec-card--line .syntec-dash-load .cnc-load-ring-wrap {
   font-size: 0.92rem;
 }
 
-.screen-grid-left-realtime .xz-line-panel,
-.screen-grid-realtime .xz-line-panel {
-  min-height: calc(100vh - 240px);
-}
-
-.screen-grid-left-realtime .xz-line-board,
-.screen-grid-realtime .xz-line-board {
-  flex: 1 1 auto;
-  min-height: 0;
-}
-
 /* 套筒滚子产线：9 行 × 3 列，与车间 IP 布置图一致 */
 .ttgz-line-panel {
   display: flex;
@@ -2906,17 +3043,6 @@ html.screen-display .syntec-card--line .syntec-dash-load .cnc-load-ring-wrap {
   font-size: 0.9rem;
   padding: 24px 12px;
   text-align: center;
-}
-
-.screen-grid-left-realtime .ttgz-line-panel,
-.screen-grid-realtime .ttgz-line-panel {
-  min-height: calc(100vh - 240px);
-}
-
-.screen-grid-left-realtime .ttgz-line-board,
-.screen-grid-realtime .ttgz-line-board {
-  flex: 1 1 auto;
-  min-height: 0;
 }
 
 .gantt-shell {
