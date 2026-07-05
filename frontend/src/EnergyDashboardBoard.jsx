@@ -261,44 +261,46 @@ export function EnergyDashboardBoard({ bootstrap }) {
       ) : null}
 
       <div className="edb-kpi-row">
-        <article className="edb-kpi">
-          <span className="edb-kpi-label">今日总用电</span>
-          <strong className="edb-kpi-val cyan">{formatNum(summary.todayKwh)}</strong>
-          <span className="edb-kpi-unit">{summary.unit || "kWh"}</span>
-        </article>
-        <article className="edb-kpi">
-          <span className="edb-kpi-label">本月累计</span>
-          <strong className="edb-kpi-val blue">{formatNum(summary.monthKwh)}</strong>
-          <span className="edb-kpi-unit">{summary.unit || "kWh"}</span>
-        </article>
-        <article className="edb-kpi edb-kpi--merged-run-alert">
-          <span className="edb-kpi-label">运行与通讯异常</span>
-          <div className="edb-kpi-split">
-            <div className="edb-kpi-split-cell">
-              <span className="edb-kpi-sublabel">运行设备</span>
-              <strong className="edb-kpi-val green">{summary.runningDeviceCount ?? "—"}</strong>
-            </div>
-            <div className="edb-kpi-split-cell">
-              <span className="edb-kpi-sublabel">通讯异常</span>
-              <strong className="edb-kpi-val red">{summary.abnormalDeviceCount ?? "—"}</strong>
-            </div>
-          </div>
-        </article>
-        <article className="edb-kpi edb-kpi-wide">
-          <span className="edb-kpi-label">分类用电（今日）</span>
-          <div className="edb-mini-bars">
-            {(summary.categoryMiniBars ?? []).map((c) => (
-              <div key={c.id} className="edb-mini-bar-i">
-                <span>{c.label}</span>
-                <div className="edb-mini-track">
-                  <div className="edb-mini-fill" style={{ width: `${c.percent}%`, background: c.color }} />
-                </div>
-                <em>{c.percent}%</em>
+        <div className="edb-kpi-row-main">
+          <article className="edb-kpi">
+            <span className="edb-kpi-label">今日总用电</span>
+            <strong className="edb-kpi-val cyan">{formatNum(summary.todayKwh)}</strong>
+            <span className="edb-kpi-unit">{summary.unit || "kWh"}</span>
+          </article>
+          <article className="edb-kpi">
+            <span className="edb-kpi-label">本月累计</span>
+            <strong className="edb-kpi-val blue">{formatNum(summary.monthKwh)}</strong>
+            <span className="edb-kpi-unit">{summary.unit || "kWh"}</span>
+          </article>
+          <article className="edb-kpi edb-kpi--merged-run-alert">
+            <span className="edb-kpi-label">运行与通讯异常</span>
+            <div className="edb-kpi-split">
+              <div className="edb-kpi-split-cell">
+                <span className="edb-kpi-sublabel">运行设备</span>
+                <strong className="edb-kpi-val green">{summary.runningDeviceCount ?? "—"}</strong>
               </div>
-            ))}
-          </div>
-        </article>
-        <article className="edb-kpi edb-kpi-tall">
+              <div className="edb-kpi-split-cell">
+                <span className="edb-kpi-sublabel">通讯异常</span>
+                <strong className="edb-kpi-val red">{summary.abnormalDeviceCount ?? "—"}</strong>
+              </div>
+            </div>
+          </article>
+          <article className="edb-kpi edb-kpi-wide">
+            <span className="edb-kpi-label">分类用电（今日）</span>
+            <div className="edb-mini-bars">
+              {(summary.categoryMiniBars ?? []).map((c) => (
+                <div key={c.id} className="edb-mini-bar-i">
+                  <span>{c.label}</span>
+                  <div className="edb-mini-track">
+                    <div className="edb-mini-fill" style={{ width: `${c.percent}%`, background: c.color }} />
+                  </div>
+                  <em>{c.percent}%</em>
+                </div>
+              ))}
+            </div>
+          </article>
+        </div>
+        <article className="edb-kpi edb-kpi-tall edb-kpi-aside">
           <span className="edb-kpi-label">昨日同时段对比</span>
           <div className="edb-yoy">
             <span>昨日窗 {formatNum(summary.yesterdaySameWindowKwh)}</span>
@@ -387,7 +389,10 @@ export function EnergyDashboardBoard({ bootstrap }) {
               {(loops ?? []).map((l, i) => (
                 <li key={i}>
                   <span>{l.loopType}</span>
-                  <strong>{formatNum(l.kwh)}</strong>
+                  <span className="edb-loop-val">
+                    <strong>{formatNum(l.kwh)}</strong>
+                    <em className="edb-loop-unit">kWh</em>
+                  </span>
                 </li>
               ))}
             </ul>
