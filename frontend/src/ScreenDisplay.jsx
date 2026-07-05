@@ -379,6 +379,13 @@ function resolveConfiguredPages(screenKey, pageKeys) {
   return DEFAULT_PAGE_KEYS[screenKey].map((pageKey) => presets[pageKey]).filter(Boolean);
 }
 
+function buildPageRotationSignature(pages) {
+  if (!Array.isArray(pages) || pages.length === 0) {
+    return "";
+  }
+  return pages.map((page) => page.key).join("\0");
+}
+
 function isModuleEnabled(moduleSettings, moduleKey) {
   return moduleSettings?.[moduleKey] !== false;
 }
@@ -461,23 +468,25 @@ function useFullscreen(targetRef) {
 
 function usePageRotation(pages, rotationIntervalSeconds) {
   const [activePageIndex, setActivePageIndex] = useState(0);
+  const pageCount = pages.length;
+  const pageSignature = buildPageRotationSignature(pages);
 
   useEffect(() => {
     setActivePageIndex(0);
-  }, [pages]);
+  }, [pageSignature]);
 
   useEffect(() => {
     const safeInterval = Number(rotationIntervalSeconds) || 0;
-    if (pages.length <= 1 || safeInterval <= 0) {
+    if (pageCount <= 1 || safeInterval <= 0) {
       return undefined;
     }
 
     const timerId = window.setInterval(() => {
-      setActivePageIndex((currentIndex) => (currentIndex + 1) % pages.length);
+      setActivePageIndex((currentIndex) => (currentIndex + 1) % pageCount);
     }, safeInterval * 1000);
 
     return () => window.clearInterval(timerId);
-  }, [pages, rotationIntervalSeconds]);
+  }, [pageSignature, pageCount, rotationIntervalSeconds]);
 
   return [activePageIndex, setActivePageIndex];
 }
