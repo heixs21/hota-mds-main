@@ -9,7 +9,6 @@ function PlaceholderScreen({ route }) {
           <a href="/screen/05/left">/screen/05/left</a>
           <a href="/screen/05/right">/screen/05/right</a>
           <a href="/admin/login">/admin/login</a>
-          <a href="/admin/devices">/admin/devices</a>
         </div>
       </section>
     </main>
