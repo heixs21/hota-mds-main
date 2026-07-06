@@ -990,6 +990,25 @@ class BackofficeApiTests(TestCase):
         self.assertEqual(delete_response.data["code"], "CONFLICT")
         self.assertIn("protectedObjects", delete_response.data["data"])
 
+    def test_delete_area_blocked_when_screen_configs_reference_it(self):
+        area = self.client.post(
+            "/api/admin/areas",
+            {"code": "A-DEL-SC", "name": "仅大屏区域", "isActive": True},
+            format="json",
+        ).data["data"]
+        ScreenConfig.objects.create(
+            area_id=area["id"],
+            screen_key="left",
+            title="左屏",
+            is_active=True,
+        )
+        delete_response = self.client.delete(f"/api/admin/areas/{area['id']}")
+        self.assertEqual(delete_response.status_code, 409)
+        self.assertEqual(delete_response.data["code"], "CONFLICT")
+        self.assertIn("protectedObjects", delete_response.data["data"])
+        self.assertIn("大屏屏幕配置", delete_response.data["message"])
+        self.assertTrue(Area.objects.filter(pk=area["id"]).exists())
+
     def test_delete_area_allowed_after_clearing_line_reference(self):
         area = self.client.post(
             "/api/admin/areas",

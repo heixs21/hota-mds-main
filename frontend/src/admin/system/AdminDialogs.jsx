@@ -2,7 +2,11 @@ import { Button, Descriptions, Modal, Table } from "antd";
 import { useEffect, useMemo, useState } from "react";
 
 import { apiRequest } from "../../adminApi.js";
-import { buildRowIndexColumn } from "../adminUtils.js";
+import {
+  ADMIN_TABLE_PAGE_SIZE_CHANGER,
+  ADMIN_TABLE_PAGE_SIZE_OPTIONS,
+  buildRowIndexColumn,
+} from "../adminUtils.js";
 
 /**
  * 「系统设置」侧：数据源历史、设备详情等弹窗。
@@ -170,8 +174,8 @@ export function HistoryDialog({ resourceDefinition, item, token, onClose, onUnau
               setPageSize(nextPageSize);
             },
             pageSize,
-            pageSizeOptions: [10, 20, 50],
-            showSizeChanger: true,
+            pageSizeOptions: ADMIN_TABLE_PAGE_SIZE_OPTIONS,
+            showSizeChanger: ADMIN_TABLE_PAGE_SIZE_CHANGER,
             showTotal: () => `共 ${total} 条，当前第 ${page}/${totalPages} 页`,
             total,
           }}

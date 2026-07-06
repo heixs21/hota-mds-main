@@ -396,7 +396,10 @@ class ScreenConfig(ReservedFieldsMixin, TimestampedModel):
         ]
 
     def __str__(self):
-        return self.screen_key
+        side = dict(self.SCREEN_CHOICES).get(self.screen_key, self.screen_key)
+        if self.area_id:
+            return f"大屏{side}（{self.area.name}）"
+        return f"大屏{side}"
 
 
 class DisplayContentConfig(ReservedFieldsMixin, TimestampedModel):
@@ -1266,7 +1269,9 @@ class ScreenPageBinding(ReservedFieldsMixin, TimestampedModel):
         ordering = ["area_id", "screen_key", "page_key"]
 
     def __str__(self):
-        return f"{self.screen_key}:{self.page_key}"
+        side = dict(SCREEN_KEY_CHOICES).get(self.screen_key, self.screen_key)
+        area_part = self.area.name if self.area_id else "全局"
+        return f"{area_part}-{side}-{self.page_key}"
 
 
 class OperationLog(models.Model):

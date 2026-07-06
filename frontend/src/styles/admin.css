@@ -162,7 +162,8 @@
   flex: 0 0 auto;
   margin: 12px 0 0 !important;
   position: relative;
-  z-index: 1;
+  /* Above fixed-right action columns (antd table fixed z-index ~2+). */
+  z-index: 10;
 }
 
 .resource-crud-table-wrap .resource-crud-pagination {

@@ -115,6 +115,32 @@ export function humanizeJsonFieldSyntaxError(field, syntaxError) {
   return `「${label}」的内容不是合法的 JSON，请检查引号、逗号与大括号是否配对。`;
 }
 
+function humanizeProtectedObjectLabel(label) {
+  if (typeof label !== "string") {
+    return String(label);
+  }
+  const trimmed = label.trim();
+  if (trimmed === "left") {
+    return "左屏";
+  }
+  if (trimmed === "right") {
+    return "右屏";
+  }
+  return trimmed;
+}
+
+function formatConflictError(error, fallback) {
+  const data = error?.data;
+  const objects = Array.isArray(data?.protectedObjects) ? data.protectedObjects : [];
+  const base = (typeof error?.message === "string" && error.message.trim()) || fallback;
+  if (objects.length === 0) {
+    return base;
+  }
+  const friendly = objects.map(humanizeProtectedObjectLabel).slice(0, 5);
+  const suffix = objects.length > 5 ? " 等" : "";
+  return `${base}（引用：${friendly.join("、")}${suffix}）`;
+}
+
 /**
  * Map fetch / unified API errors to a short Chinese message.
  * @param {Error & { status?: number, code?: string, data?: unknown }} error
@@ -138,6 +164,10 @@ export function humanizeAdminApiError(error, fields, options = {}) {
   }
   if (typeof status === "number" && status >= 500) {
     return "服务器暂时不可用，请稍后再试。";
+  }
+
+  if (error?.code === "CONFLICT" && error?.data && typeof error.data === "object") {
+    return formatConflictError(error, fallback);
   }
 
   const data = error?.data;

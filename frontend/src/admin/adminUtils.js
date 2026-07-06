@@ -16,6 +16,14 @@ export function httpErrorToastVariant(status) {
   return "error";
 }
 
+/** Page-size Select props so the dropdown renders above fixed table columns. */
+export const ADMIN_TABLE_PAGE_SIZE_CHANGER = {
+  getPopupContainer: () => document.body,
+  popupClassName: "admin-table-page-size-dropdown",
+};
+
+export const ADMIN_TABLE_PAGE_SIZE_OPTIONS = [10, 20, 50];
+
 /** Display-only row index column; respects current pagination. */
 export function buildRowIndexColumn(page, pageSize) {
   return {

@@ -3,10 +3,30 @@ from pathlib import Path
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+ROOT_DIR = BASE_DIR.parent
+
+
+def _load_dotenv() -> None:
+    """Load repo-root .env for local manage.py; Docker injects env vars directly."""
+    try:
+        from dotenv import load_dotenv
+    except ImportError:
+        return
+    for env_path in (ROOT_DIR / ".env", BASE_DIR / ".env"):
+        if env_path.is_file():
+            load_dotenv(env_path, override=False)
+            return
+
+
+_load_dotenv()
 
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "change-me-in-local-env")
 DEBUG = os.getenv("DJANGO_DEBUG", "0") == "1"
-ALLOWED_HOSTS = ["*"]
+ALLOWED_HOSTS = [
+    host.strip()
+    for host in os.getenv("DJANGO_ALLOWED_HOSTS", "*").split(",")
+    if host.strip()
+]
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -50,32 +70,32 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "hota_mds.wsgi.application"
 
-# DATABASES = {
-#     "default": {
-#         "ENGINE": "django.db.backends.mysql",
-#         "NAME": os.getenv("MYSQL_DATABASE", "hota_mds"),
-#         "USER": os.getenv("MYSQL_USER", "hota_user"),
-#         "PASSWORD": os.getenv("MYSQL_PASSWORD", "hota_password"),
-#         "HOST": os.getenv("MYSQL_HOST", "db"),
-#         "PORT": os.getenv("MYSQL_PORT", "3306"),
-#         "OPTIONS": {
-#             "charset": "utf8mb4",
-#         },
-#     }
-# }
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.mysql",
-        "NAME": "mds-dev",
-        "USER": "root",
-        "PASSWORD": "123456",
-        "HOST": "192.168.36.86",
-        "PORT": "3306",
+        "NAME": os.getenv("MYSQL_DATABASE", "hota_mds"),
+        "USER": os.getenv("MYSQL_USER", "hota_user"),
+        "PASSWORD": os.getenv("MYSQL_PASSWORD", "hota_password"),
+        "HOST": os.getenv("MYSQL_HOST", "127.0.0.1"),
+        "PORT": os.getenv("MYSQL_PORT", "3306"),
         "OPTIONS": {
             "charset": "utf8mb4",
         },
     }
 }
+# DATABASES = {
+#     "default": {
+#         "ENGINE": "django.db.backends.mysql",
+#         "NAME": "mds-dev",
+#         "USER": "root",
+#         "PASSWORD": "123456",
+#         "HOST": "192.168.36.86",
+#         "PORT": "3306",
+#         "OPTIONS": {
+#             "charset": "utf8mb4",
+#         },
+#     }
+# }
 
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},

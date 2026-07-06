@@ -4,7 +4,11 @@ import { useCallback, useMemo, useRef } from "react";
 
 import { formatCellValue, stringifyJson, collectBooleanFieldKeys } from "../../adminResources.js";
 import { useAdminSession } from "../context/AdminSessionContext.jsx";
-import { buildRowIndexColumn } from "../adminUtils.js";
+import {
+  ADMIN_TABLE_PAGE_SIZE_CHANGER,
+  ADMIN_TABLE_PAGE_SIZE_OPTIONS,
+  buildRowIndexColumn,
+} from "../adminUtils.js";
 import { useResourceCrud } from "../hooks/useResourceCrud.js";
 import { useTableBodyScrollY } from "../hooks/useTableBodyScrollY.js";
 import { DeviceDetailDialog, HistoryDialog } from "../system/AdminDialogs.jsx";
@@ -300,8 +304,8 @@ export default function ResourceCrudPage({ resourceKey }) {
               current: crud.page,
               onChange: (nextPage, nextPageSize) => crud.handlePageChange(nextPage, nextPageSize),
               pageSize: crud.pageSize,
-              pageSizeOptions: [10, 20, 50],
-              showSizeChanger: true,
+              pageSizeOptions: ADMIN_TABLE_PAGE_SIZE_OPTIONS,
+              showSizeChanger: ADMIN_TABLE_PAGE_SIZE_CHANGER,
               showTotal: (value) => (
                 <Space className="resource-crud-pagination-summary" size="middle">
                   {crud.checkedIds.size > 0 && !resourceDefinition.readOnly ? (
