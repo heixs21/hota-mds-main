@@ -1,22 +1,9 @@
-services:
-  db:
-    image: mysql:8.4
-    environment:
-      MYSQL_DATABASE: ${MYSQL_DATABASE:-hota_mds}
-      MYSQL_USER: ${MYSQL_USER:-hota_user}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-hota_password}
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-hota_root_password}
-    ports:
-      - "3306:3306"
-    volumes:
-      - mysql_data:/var/lib/mysql
-    healthcheck:
-      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u$${MYSQL_USER} -p$${MYSQL_PASSWORD} --silent"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-    restart: unless-stopped
+# 使用已有 MySQL 容器，不在 compose 内新建 db。
+# 在 .env 中配置 MYSQL_HOST：
+#   - MySQL 已映射本机 3306 → host.docker.internal（Windows Docker Desktop 默认）
+#   - 与 backend 同 Docker 网络 → 填 MySQL 容器名，如 mysql
 
+services:
   backend:
     build:
       context: ./backend
@@ -27,13 +14,13 @@ services:
       MYSQL_DATABASE: ${MYSQL_DATABASE:-hota_mds}
       MYSQL_USER: ${MYSQL_USER:-hota_user}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-hota_password}
-      MYSQL_HOST: db
-      MYSQL_PORT: 3306
+      MYSQL_HOST: ${MYSQL_HOST:-host.docker.internal}
+      MYSQL_PORT: ${MYSQL_PORT:-3306}
+      SKIP_MIGRATE: ${SKIP_MIGRATE:-0}
     ports:
       - "${BACKEND_PORT:-8000}:8000"
-    depends_on:
-      db:
-        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3).read()\""]
       interval: 30s
@@ -55,10 +42,4 @@ services:
       context: ./collector
     environment:
       COLLECTOR_INTERVAL_SECONDS: ${COLLECTOR_INTERVAL_SECONDS:-60}
-    depends_on:
-      db:
-        condition: service_healthy
     restart: unless-stopped
-
-volumes:
-  mysql_data:

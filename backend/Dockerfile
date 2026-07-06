@@ -16,4 +16,4 @@ COPY . .
 
 EXPOSE 8000
 
-CMD ["sh", "-c", "python manage.py migrate --noinput && python manage.py runserver 0.0.0.0:8000"]
+CMD ["sh", "-c", "if [ \"$SKIP_MIGRATE\" != \"1\" ]; then python manage.py migrate --noinput; fi && python manage.py runserver 0.0.0.0:8000"]

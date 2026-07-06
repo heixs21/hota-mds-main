@@ -104,6 +104,8 @@
 cp .env.example .env
 ```
 
+编辑 `.env`：`MYSQL_HOST` 指向已有 MySQL（本机映射端口用 `host.docker.internal`，同 Docker 网络用 MySQL 容器名）。Compose **不会**新建 MySQL 容器。
+
 1. 使用 Docker Compose 启动
 
 ```bash
