@@ -15,3 +15,29 @@ export function httpErrorToastVariant(status) {
   }
   return "error";
 }
+
+/** Display-only row index column; respects current pagination. */
+export function buildRowIndexColumn(page, pageSize) {
+  return {
+    title: "序号",
+    key: "__rowIndex",
+    width: 64,
+    align: "center",
+    render: (_, __, index) => (page - 1) * pageSize + index + 1,
+  };
+}
+
+/** Placeholder text for antd Select in admin forms or query bars. */
+export function buildSelectPlaceholder(field, { query = false } = {}) {
+  if (field?.placeholder) {
+    return field.placeholder;
+  }
+  if (query) {
+    return "全部";
+  }
+  if (field?.allowBlank) {
+    return "不设置";
+  }
+  const label = field?.label?.trim();
+  return label ? `请选择${label}` : "请选择";
+}

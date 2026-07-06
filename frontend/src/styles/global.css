@@ -1,0 +1,114 @@
+/* ================================================================
+   HOTA MDS 鈥?Global foundations & placeholder home (unchanged look)
+   ================================================================ */
+
+:root {
+  color: #182126;
+  background: #f4f1e8;
+  font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+  line-height: 1.5;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  min-width: 320px;
+}
+
+/* 左右屏大屏：单页填满视口，避免页面级纵向滚动条（含全屏模式） */
+html:has(.screen-left),
+html:has(.screen-right),
+html:has(.screen-left) body,
+html:has(.screen-right) body,
+html:has(.screen-left) #root,
+html:has(.screen-right) #root {
+  height: 100%;
+  overflow: hidden;
+}
+
+a {
+  color: inherit;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+}
+
+.eyebrow {
+  color: #177245;
+  font-size: 0.875rem;
+  font-weight: 700;
+  margin: 0 0 0.75rem;
+  text-transform: uppercase;
+}
+
+.placeholder-shell,
+.screen-shell {
+  min-height: 100vh;
+}
+
+.placeholder-shell {
+  padding: 24px;
+}
+
+.placeholder-band {
+  background: #fffdf7;
+  border: 1px solid #d7d0c4;
+  border-radius: 8px;
+  margin: 0 auto;
+  max-width: 880px;
+  padding: 32px;
+}
+
+.placeholder-band h1 {
+  color: #1a1f1c;
+  font-size: 2rem;
+  margin-bottom: 12px;
+}
+
+.placeholder-band p {
+  color: #465057;
+}
+
+.quick-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.quick-links a {
+  background: #fffdf7;
+  border: 1px solid #c9c2b6;
+  border-radius: 6px;
+  padding: 10px 14px;
+  text-decoration: none;
+}
+

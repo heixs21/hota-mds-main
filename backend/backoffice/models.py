@@ -1253,9 +1253,9 @@ class ScreenPageBinding(ReservedFieldsMixin, TimestampedModel):
     )
     realtime_demo_mode = models.BooleanField(
         default=True,
-        verbose_name="展示模式",
+        verbose_name="使用演示数据",
         help_text="仅 page_key=realtime 时生效；启用后不连接现场设备，全部显示在线演示数据",
-        db_comment="设备实时监控展示模式；启用后全部工位在线并展示演示数据",
+        db_comment="设备实时监控是否使用演示数据；启用后全部工位在线并展示演示数据",
     )
     notes = models.TextField(blank=True, verbose_name="备注", db_comment="备注")
 

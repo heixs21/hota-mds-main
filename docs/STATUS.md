@@ -1994,3 +1994,36 @@ P3：
 ## 89. 本轮更新记录（文档：左屏产量概览真实数据）
 
 - 左屏「产量执行概览」在排产 MySQL 配置成功时与右屏甘特同源取数；`docs/DATA_REALITY.md`、本文档第 0 节与 `README.md` 已同步为「产量可真实、近 8 小时趋势仍为快照」的表述。
+
+## 90. 后台 antd 重构与 Schema 维护（M-B / M-C）
+
+### 架构现状（M-B0～M-B4，已完成）
+
+- 路由：扁平 URL `/admin/{slug}`（react-router-dom），19 个菜单页 lazy 加载。
+- 壳层：`AdminLayout` + antd Layout / Menu / Header / Sider。
+- 业务：薄 `*Page.jsx` → `createResourcePage` → `ResourceCrudPage` + `useResourceCrud`。
+- 构建：`vite.config.js` 拆分 `antd` / `react-vendor` chunk；详见 `docs/HANDOFF.md` §64。
+
+### Schema 维护（M-C）
+
+| 子项 | 状态 | 说明 |
+|------|------|------|
+| M-C1 Schema 拆分 | ✅ | `frontend/src/admin/schemas/`；`adminResources.js` 仅为 re-export |
+| M-C2 JSDoc + 校验 | ✅ | `schemaTypes.js`、`validateResourceDefinitions.js`；`npm run validate:schemas` |
+| M-C3 Tier + SOP | ✅ | 决策流程与新增页步骤见 **`docs/PLAN.md` §12**；字段字典见 **`docs/ADMIN_SCHEMA.md`** |
+| M-C4 引擎扩展点 | ⏸ 未做 | Tier B 需求出现前可跳过 |
+| M-C5 TS / 单测 / 注册合一 | ⏸ 未做 | 可选；当前靠 validate 脚本 |
+
+### 新增后台页时（团队约定）
+
+1. 按 **`docs/PLAN.md` §12.3** 选定 Tier（默认 A）。
+2. 按 **§12.4** 十步 SOP 改 schema、菜单、`ADMIN_RESOURCE_KEYS`、`PAGE_LOADERS`、Page 文件。
+3. 必须通过 `npm run validate:schemas` 与 `npm run build`。
+4. 复杂页勿硬塞进 schema；升 Tier B/C 并在 `HANDOFF.md` 记录原因。
+
+### 验证命令
+
+```bash
+cd frontend && npm run validate:schemas
+cd frontend && npm run build
+```

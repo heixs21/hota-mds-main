@@ -7,6 +7,21 @@ export default defineConfig({
   // 电视 WebView 可能低于 Chrome 80，不支持 ?. / ?? 等语法；dev 的 @vite/client 无法降级，电视请用 preview
   build: {
     target: "chrome63",
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes("node_modules")) {
+            return undefined;
+          }
+          if (id.includes("antd") || id.includes("@ant-design")) {
+            return "antd";
+          }
+          if (id.includes("react-router") || id.includes("react-dom") || id.includes("/react/")) {
+            return "react-vendor";
+          }
+        },
+      },
+    },
   },
   server: {
     host: "0.0.0.0",

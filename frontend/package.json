@@ -6,12 +6,17 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
+    "validate:schemas": "node scripts/validate-admin-schemas.mjs",
     "preview": "vite preview --host 0.0.0.0",
     "preview:tv": "vite build && vite preview --host 0.0.0.0"
   },
   "dependencies": {
+    "@ant-design/icons": "^6.3.2",
+    "antd": "^6.5.0",
+    "dayjs": "^1.11.11",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "react-router-dom": "^7.18.1",
     "vite": "^7.0.0"
   },
   "devDependencies": {

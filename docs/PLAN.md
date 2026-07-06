@@ -319,3 +319,91 @@
 依赖关系：
 
 - 不进入一期前段开发。
+
+## 12. 后台 Schema 维护（M-C）
+
+> 详细字段说明见 **`docs/ADMIN_SCHEMA.md`**。本节定义 **Tier 分级决策** 与 **新增后台页 SOP**，供 M-B antd 重构后的日常扩展使用。
+
+### 12.1 背景与范围
+
+- 19 个侧栏页采用 **schema 驱动 + 共享 CRUD 引擎**（`ResourceCrudPage` / `useResourceCrud`）。
+- Schema 源码位于 `frontend/src/admin/schemas/`；构建与 `npm run validate:schemas` 会执行轻量校验（M-C2）。
+- 本里程碑 **不重写后端 API**，**不强制 TypeScript**；复杂页允许脱离 schema。
+
+### 12.2 Tier 分级
+
+| Tier | 适用场景 | 实现方式 | 示例 |
+|------|----------|----------|------|
+| **A** | 标准列表 CRUD：查询、分页、Modal 新建/编辑、批量删除 | 只增 schema + 菜单 + 路由 + 薄 Page | `devices`、`areas` |
+| **A+** | Tier A + 引擎已支持的能力（穿梭框、批量工具条、宽 Modal、只读） | 同上，善用 `bulkApplyToolbar`、`screenPageTransfer` 等 | `screenConfigs`、`screenPageBindings` |
+| **B** | 列表仍用引擎，但需定制 UI 块（非标准列/表单区） | schema + 引擎扩展点（**M-C4**，未做前尽量避免） | 暂无 |
+| **C** | 流程/布局完全特殊，无法描述为字段列表 | 独立 `*Page.jsx`，自行调 API | 未来报表向导、多步配置 |
+
+**升级信号（应离开 Tier A）：**
+
+- 需要在 `ResourceCrudPage` / `useResourceCrud` 中为同一 `resourceKey` 增加 **≥2 处** 硬编码分支；
+- 需要向导、分步表单、嵌入图表等非 Modal CRUD 交互；
+- schema 字段已无法表达业务，只能靠 JSON 文本「凑」配置。
+
+**默认原则：** 新台账/配置类需求 **先按 Tier A 评估**；不满足再升 Tier B/C，并在 PR 或 `HANDOFF.md` 注明原因。
+
+### 12.3 Tier 决策流程
+
+```text
+需要新的后台页？
+  │
+  ├─ 否 → 只改现有 schema 字段/列/选项（仍 Tier A）
+  │
+  └─ 是 → 是否为「列表 + 查询 + 分页 + Modal CRUD」？
+           │
+           ├─ 是 → 现有 field type / cellFormat 是否够用？
+           │        ├─ 是 → Tier A（或 A+）
+           │        └─ 否 → 新 field 类型？→ 先扩展 schemaRegistry + ResourceField（或等待 M-C4）
+           │
+           └─ 否 → Tier C（独立 Page）；若仅部分 UI 特殊 → Tier B（M-C4 扩展点）
+```
+
+### 12.4 新增 Tier A 页面 SOP
+
+**前置：** 后端 REST 路径与字段命名已确定（响应 camelCase，查询参数 snake_case）。
+
+| 步骤 | 位置 | 动作 |
+|------|------|------|
+| 1 | 选型 | 确认 Tier A；记录 resourceKey（camelCase，全局唯一） |
+| 2 | Schema | 在 `ledger.js` / `screen.js` / `system.js` 或 `dataSources.js` 增加条目；含 `label`、`endpoint`、`columns`、`fields`、`queryFields`；表单末尾 `...RESERVED_FIELDS` |
+| 3 | 菜单 | `schemas/menu.js` → `ADMIN_MENU_GROUPS` 对应分组增加 key |
+| 4 | 路由键 | `routes/resourcePaths.js` → `ADMIN_RESOURCE_KEYS` 增加同一 key |
+| 5 | Lazy 页 | `routes/adminRouteRegistry.js` → `PAGE_LOADERS` 增加 lazy import |
+| 6 | Page 文件 | `pages/{Name}Page.jsx` → `export default createResourcePage("resourceKey")` |
+| 7 | 校验 | `cd frontend && npm run validate:schemas`（菜单 ↔ 路由 ↔ schema 对齐） |
+| 8 | 构建 | `npm run build` |
+| 9 | 冒烟 | 登录 → `/admin/{slug}` 深链 → 新建/编辑/删除/查询 |
+| 10 | 文档 | 若引入新 field 模式，更新 `docs/ADMIN_SCHEMA.md`；本轮变更写入 `docs/HANDOFF.md` |
+
+**slug 规则：** `resourceKey` 的 camelCase 转 kebab-case（如 `screenConfigs` → `/admin/screen-configs`），由 `resourceKeyToSlug()` 自动生成。
+
+**数据源类页面：** 优先扩展 `dataSources.js` 的 `DATA_SOURCE_TYPE_*`，而非复制整份 schema。
+
+### 12.5 修改现有页 SOP（仍 Tier A）
+
+1. 只改对应 schema 文件中的 `columns` / `fields` / `queryFields` / 选项常量。
+2. 若改 `resourceKey` 或菜单结构，同步步骤 3～5。
+3. 运行 `validate:schemas` + `build`。
+4. 后端字段变更时同步改 API 与 schema 的 `key` 对齐。
+
+### 12.6 验收标准（Tier A 新页）
+
+- `npm run validate:schemas` 无报错。
+- `npm run build` 通过。
+- 侧栏可进入，URL 可深链刷新，高亮正确。
+- CRUD 与列表查询与后端联调通过。
+- 未引入引擎内新的 `resourceKey` 硬编码分支（除非已批准升 Tier B/C）。
+
+### 12.7 与 M-C4 / M-C5 的关系
+
+| 里程碑 | 内容 | 不做时的应对 |
+|--------|------|--------------|
+| M-C4 | 引擎扩展点，注册表驱动 field/column | Tier B 需求暂用 Tier C 独立页，或接受引擎 if 分支 |
+| M-C5 | TS、Vitest、三处注册合一 | 靠 `validate:schemas` + 人工同步三处注册 |
+
+**当前状态：** M-C1（拆分）、M-C2（校验）、M-C3（本 SOP）已完成；M-C4/M-C5 按需推进。

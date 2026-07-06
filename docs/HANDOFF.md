@@ -2219,3 +2219,194 @@
 ### 建议下一轮优先任务
 
 - 若继续收口 M4，建议增加分组折叠与分组图标，进一步提升大屏驾驶舱观感。
+
+## 64. 后台 antd 重构交接（M-B0 ~ M-B4）
+
+### 架构结果
+
+- 路由：`react-router-dom`，扁平路径 `/admin/{slug}`（如 `/admin/devices`）。
+- 壳层：`AdminLayout` + antd `Menu` / `Header` / `Sider`。
+- 业务页：19 个 `pages/*Page.jsx`，经 `createResourcePage` 复用 `ResourceCrudPage`。
+- 表单/对话框：`ResourceField`（antd）、`AdminDialogs`（antd Modal + Table）。
+- 代码分割：`App.jsx` lazy 加载 `AdminApp`；`adminRouteRegistry.js` 按页 lazy；`vite.config.js` 拆分 `antd` / `react-vendor` chunk。
+
+### 已删除的旧实现
+
+- `ResourceEditor.jsx`、`ResourceModalForm.jsx`、`ResourceQueryBar.jsx`
+- `ledger/ResourceTable.jsx`、`sidebar/ResourceSidebar.jsx`
+- `admin.css` 中旧 table/modal/field/transfer 样式（现约 490 行）
+
+### 验证命令
+
+```bash
+cd frontend && npm run build
+```
+
+构建产物应包含独立 `antd-*.js`、`AdminApp-*.js`、各 `*Page-*.js` 与共享 `createResourcePage-*.js`。
+
+### 建议冒烟
+
+- P0：`/admin/login` → 默认页；深链刷新；侧栏高亮
+- P1：devices CRUD；screen-configs 穿梭框；OPC UA 历史 Modal
+- P2：`/screen/*` 不受 antd 影响；暗/亮主题切换
+
+## 65. Schema 拆分交接（M-C1）
+
+### 本轮目标
+
+- 将原 ~1170 行 `adminResources.js` 按职责拆分为 `frontend/src/admin/schemas/` 多文件。
+- 编写 `docs/ADMIN_SCHEMA.md` 初稿，说明 ResourceDefinition 与扩展 Tier。
+
+### 本轮实际完成
+
+- **目录拆分**
+  - `shared.js` — `OMIT_VALUE`、`RESERVED_FIELDS`
+  - `options.js` — 下拉选项与页面键常量
+  - `menu.js` — `ADMIN_MENU_GROUPS`、`DEFAULT_ADMIN_RESOURCE`
+  - `formUtils.js` — 表单/列工具函数
+  - `ledger.js` / `screen.js` / `system.js` — 分组 resource 定义
+  - `dataSources.js` — `buildDataSourceResources()` 动态 6 类数据源
+  - `index.js` — 合并 `resourceDefinitions` + `assertResourceDefinitions()`
+- **兼容入口**：`frontend/src/adminResources.js` 仅 `export * from "./admin/schemas/index.js"`，现有 `import '../../adminResources.js'` 无需改动。
+- **文档**：`docs/ADMIN_SCHEMA.md`（字段表、Field 类型、列格式、bulkApplyToolbar、Tier A/B/C、devices / screenConfigs 示例）。
+- **构建**：`cd frontend && npm run build` 通过；启动时校验侧栏 19 个叶子 key 均有 schema。
+
+### 修复项（拆分脚本遗留）
+
+- `screen.js`：`displayContentConfigs` 缺少闭合 `},`
+- `dataSources.js`：`buildDataSourceResources` 改为 `export function`
+
+### 未完成 / 下一轮
+
+- M-C3：新增页面 SOP 与 Tier 决策流程写入 STATUS/PLAN
+
+### 建议冒烟
+
+- `/admin/devices` — 标准 Tier A CRUD
+- `/admin/screen-configs` — 宽 Modal + 穿梭框 + 批量轮播
+- `/admin/operation-logs` — 只读列表 + `cstDateTime` 列
+- `/admin/opcua-data-source`（或对应 slug）— 测试连接 / 历史 / 复制新增
+
+### 修改文件清单
+
+- `frontend/src/adminResources.js`
+- `frontend/src/admin/schemas/**`
+- `frontend/scripts/split-admin-resources.py`（可选保留）
+- `docs/ADMIN_SCHEMA.md`
+- `docs/HANDOFF.md`
+
+## 66. Schema 校验交接（M-C2）
+
+### 本轮目标
+
+- JSDoc typedef 描述 ResourceDefinition 结构。
+- 轻量运行时校验：字段类型、列格式、关联引用、批量工具条形态。
+- 可独立执行的 `npm run validate:schemas`（含菜单 ↔ 路由注册表对齐）。
+
+### 本轮实际完成
+
+- **`schemaTypes.js`** — `@typedef ResourceDefinition` / `FieldDefinition` / `ColumnDefinition` / `BulkApplyToolbar` 等。
+- **`schemaRegistry.js`** — `FORM_FIELD_TYPES`、`QUERY_FIELD_TYPES`、`CELL_FORMATS`、`BULK_*` 白名单。
+- **`validateResourceDefinitions.js`** — `collectResourceDefinitionErrors()` + `validateResourceDefinitions()`；`index.js` 构建时调用后者。
+- **`scripts/validate-admin-schemas.mjs`** + **`package.json`** → `"validate:schemas"`.
+- **`docs/ADMIN_SCHEMA.md`** §10 更新为 M-C2 校验说明。
+
+### 验证
+
+```bash
+cd frontend && npm run validate:schemas   # 20 definitions, 19 routes
+cd frontend && npm run build              # 构建时同样校验 schema
+```
+
+### 未完成 / 下一轮
+
+- M-C4：注册表驱动 `ResourceField` / `formatCellValue`，减少引擎 if 链
+
+### 修改文件清单
+
+- `frontend/src/admin/schemas/schemaTypes.js`（新）
+- `frontend/src/admin/schemas/schemaRegistry.js`（新）
+- `frontend/src/admin/schemas/validateResourceDefinitions.js`（新）
+- `frontend/src/admin/schemas/index.js`
+- `frontend/scripts/validate-admin-schemas.mjs`（新）
+- `frontend/package.json`
+- `docs/ADMIN_SCHEMA.md`
+- `docs/HANDOFF.md`
+
+## 67. Tier 分级与 SOP 交接（M-C3）
+
+### 本轮目标
+
+- 将 Tier A/B/C 决策流程与新增后台页 SOP 写入 **`docs/PLAN.md` §12**。
+- 在 **`docs/STATUS.md` §90** 记录 M-B/M-C 完成状态与团队约定。
+- 更新 **`docs/ADMIN_SCHEMA.md`**：Tier 速查、文件级清单、文档索引。
+
+### 本轮实际完成
+
+- **`PLAN.md` §12** — Tier 表、决策流程、Tier A 十步 SOP、修改现有页 SOP、验收标准、与 M-C4/M-C5 关系。
+- **`STATUS.md` §90** — M-B0～B4、M-C1～C3 状态表；新增页约定；验证命令。
+- **`ADMIN_SCHEMA.md`** — §7 Tier A+、§9 文件级清单、§11 维护文档索引。
+
+### 不做 M-C4/M-C5 时的约定（已写入 PLAN §12.7）
+
+- Tier B 需求：优先 Tier C 独立页，或临时接受引擎 `resourceKey` 分支。
+- 三处注册（menu / `ADMIN_RESOURCE_KEYS` / `PAGE_LOADERS`）继续人工同步；`validate:schemas` 覆盖 menu ↔ 路由键。
+
+### 修改文件清单
+
+- `docs/PLAN.md`
+- `docs/STATUS.md`
+- `docs/ADMIN_SCHEMA.md`
+- `docs/HANDOFF.md`
+
+## 68. antd 默认浅色主题 refactor（M-V）
+
+### 本轮目标
+
+- 去掉仿 Linear 深色 `--adm-*` 与自定义 `adminTheme` token。
+- 固定 **antd 默认浅色**（`defaultAlgorithm`），**移除明/暗切换**。
+- 查询日期、多选、decimal、登录表单改为标准 antd 组件。
+
+### 本轮实际完成
+
+- **`adminTheme.js`**：仅 `theme.defaultAlgorithm`。
+- **`AdminApp.jsx`**：`ConfigProvider locale={zhCN}`；删除 `theme` state / `data-theme` / 侧栏切换。
+- **`admin.css`**：从 ~490 行减至 ~140 行，仅保留 flex 布局 helper。
+- **`LoginPage`**：`Flex` + `Card` + antd `Form`（无渐变背景/品牌装饰）。
+- **`AntResourceQueryBar`**：`DatePicker` + `dayjs`。
+- **`ResourceField`**：`Select mode="multiple"`、`InputNumber`（decimal）、能耗多选改 Select。
+- **`package.json`**：显式依赖 `dayjs`。
+
+### 验证
+
+```bash
+cd frontend && npm run build && npm run validate:schemas
+```
+
+CSS 产物约 71KB（原 admin 相关 ~77KB）。
+
+## 68. antd 默认浅色主题 refactor（M-V）
+
+### 本轮目标
+
+- 去掉仿 Linear 深色 `--adm-*` 与自定义 `adminTheme` token。
+- 固定 **antd 默认浅色**（`defaultAlgorithm`），**移除明/暗切换**。
+- 查询日期、多选、decimal、登录表单改为标准 antd 组件。
+
+### 本轮实际完成
+
+- **`adminTheme.js`**：仅 `theme.defaultAlgorithm`。
+- **`AdminApp.jsx`**：`ConfigProvider locale={zhCN}`；删除 `theme` state / `data-theme` / 侧栏切换。
+- **`admin.css`**：从 ~490 行减至 ~140 行，仅保留 flex 布局 helper。
+- **`LoginPage`**：`Flex` + `Card` + antd `Form`（无渐变背景/品牌装饰）。
+- **`AntResourceQueryBar`**：`DatePicker` + `dayjs`。
+- **`ResourceField`**：`Select mode="multiple"`、`InputNumber`（decimal）、能耗多选改 Select。
+- **`package.json`**：显式依赖 `dayjs`。
+
+### 验证
+
+```bash
+cd frontend && npm run build && npm run validate:schemas
+```
+
+CSS 产物约 71KB（原 admin 相关 ~77KB）。

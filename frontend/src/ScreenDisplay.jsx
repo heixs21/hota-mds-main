@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 
 import { EnergyDashboardBoard } from "./EnergyDashboardBoard.jsx";
-import { RealtimeDeviceCard } from "./screen/realtime/RealtimeCards.jsx";
+import { DeviceRealtimePagedGrid } from "./screen/realtime/DeviceRealtimePagedGrid.jsx";
 import { TaotongGunziLineRealtimeBoard } from "./screen/realtime/TaotongGunziLineBoard.jsx";
 import { XiaozhouLineRealtimeBoard } from "./screen/realtime/XiaozhouLineBoard.jsx";
 import { ScreenCarouselPageContext } from "./screenCarouselContext.jsx";
@@ -379,6 +379,13 @@ function resolveConfiguredPages(screenKey, pageKeys) {
   return DEFAULT_PAGE_KEYS[screenKey].map((pageKey) => presets[pageKey]).filter(Boolean);
 }
 
+function buildPageRotationSignature(pages) {
+  if (!Array.isArray(pages) || pages.length === 0) {
+    return "";
+  }
+  return pages.map((page) => page.key).join("\0");
+}
+
 function isModuleEnabled(moduleSettings, moduleKey) {
   return moduleSettings?.[moduleKey] !== false;
 }
@@ -461,23 +468,25 @@ function useFullscreen(targetRef) {
 
 function usePageRotation(pages, rotationIntervalSeconds) {
   const [activePageIndex, setActivePageIndex] = useState(0);
+  const pageCount = pages.length;
+  const pageSignature = buildPageRotationSignature(pages);
 
   useEffect(() => {
     setActivePageIndex(0);
-  }, [pages]);
+  }, [pageSignature]);
 
   useEffect(() => {
     const safeInterval = Number(rotationIntervalSeconds) || 0;
-    if (pages.length <= 1 || safeInterval <= 0) {
+    if (pageCount <= 1 || safeInterval <= 0) {
       return undefined;
     }
 
     const timerId = window.setInterval(() => {
-      setActivePageIndex((currentIndex) => (currentIndex + 1) % pages.length);
+      setActivePageIndex((currentIndex) => (currentIndex + 1) % pageCount);
     }, safeInterval * 1000);
 
     return () => window.clearInterval(timerId);
-  }, [pages, rotationIntervalSeconds]);
+  }, [pageSignature, pageCount, rotationIntervalSeconds]);
 
   return [activePageIndex, setActivePageIndex];
 }
@@ -510,6 +519,299 @@ function useAutoVerticalScroll(containerRef, enabled, intervalMs = 40) {
 
     return () => window.clearInterval(timerId);
   }, [containerRef, enabled, intervalMs]);
+}
+
+const SEAMLESS_SCROLL_TICK_MS = 40;
+const SEAMLESS_SCROLL_ROUND_MIN_SEC = 10;
+const SEAMLESS_SCROLL_ROUND_MAX_SEC = 20;
+const SEAMLESS_SCROLL_DEFAULT_ROTATION_SEC = 45;
+
+/** One loop duration (sec): 3 rounds per carousel period, each round clamped to [10, 20]. */
+function computeSeamlessScrollRoundDurationSec(rotationIntervalSeconds) {
+  const rotation = Number(rotationIntervalSeconds);
+  const carouselSec =
+    Number.isFinite(rotation) && rotation > 0 ? rotation : SEAMLESS_SCROLL_DEFAULT_ROTATION_SEC;
+  const roundSec = carouselSec / 3;
+  return Math.min(SEAMLESS_SCROLL_ROUND_MAX_SEC, Math.max(SEAMLESS_SCROLL_ROUND_MIN_SEC, roundSec));
+}
+
+function getContentOffsetTop(container, element) {
+  if (!container || !element) {
+    return 0;
+  }
+  return element.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop;
+}
+
+/** Height of one duplicated segment within a scroll container. */
+function measureSeamlessLoopSegmentHeight(container, itemCount) {
+  if (!container || itemCount <= 0) {
+    return 0;
+  }
+
+  const children = container.children;
+  if (children.length >= itemCount * 2 && children[0] && children[itemCount]) {
+    const segment = getContentOffsetTop(container, children[itemCount]) - getContentOffsetTop(container, children[0]);
+    if (segment > 8) {
+      return segment;
+    }
+  }
+
+  if (children.length >= itemCount) {
+    let height = 0;
+    for (let i = 0; i < itemCount; i += 1) {
+      height += children[i].offsetHeight;
+    }
+    const style = window.getComputedStyle(container);
+    const gap = parseFloat(style.rowGap || style.gap || "0") || 0;
+    return height + gap * itemCount;
+  }
+
+  return 0;
+}
+
+function measureSeamlessLoopSetSegmentHeight(container) {
+  if (!container) {
+    return 0;
+  }
+  const sets = container.querySelectorAll(":scope > .seamless-loop-set");
+  if (sets.length >= 2) {
+    const segment = getContentOffsetTop(container, sets[1]) - getContentOffsetTop(container, sets[0]);
+    if (segment > 8) {
+      return segment;
+    }
+  }
+  return 0;
+}
+
+function useSeamlessLoopSegmentHeight(measureRef, loopEnabled, itemCount) {
+  const loopSegmentHeightRef = useRef(0);
+
+  useEffect(() => {
+    if (!loopEnabled || itemCount <= 0) {
+      loopSegmentHeightRef.current = 0;
+      return undefined;
+    }
+
+    const measure = () => {
+      const root = measureRef.current;
+      if (!root) {
+        return;
+      }
+      const segment = measureSeamlessLoopSegmentHeight(root, itemCount);
+      if (segment > 8) {
+        loopSegmentHeightRef.current = segment;
+      }
+    };
+
+    measure();
+    const root = measureRef.current;
+    if (!root) {
+      return undefined;
+    }
+
+    const ro = new ResizeObserver(measure);
+    ro.observe(root);
+    Array.from(root.children).forEach((child) => ro.observe(child));
+    return () => ro.disconnect();
+  }, [measureRef, loopEnabled, itemCount]);
+
+  return loopSegmentHeightRef;
+}
+
+function useSeamlessLoopSetSegmentHeight(scrollRef, loopEnabled) {
+  const loopSegmentHeightRef = useRef(0);
+
+  useEffect(() => {
+    if (!loopEnabled) {
+      loopSegmentHeightRef.current = 0;
+      return undefined;
+    }
+
+    const measure = () => {
+      const container = scrollRef.current;
+      if (!container) {
+        return;
+      }
+      const segment = measureSeamlessLoopSetSegmentHeight(container);
+      if (segment > 8) {
+        loopSegmentHeightRef.current = segment;
+      }
+    };
+
+    measure();
+    const container = scrollRef.current;
+    if (!container) {
+      return undefined;
+    }
+
+    const ro = new ResizeObserver(measure);
+    ro.observe(container);
+    container.querySelectorAll(".seamless-loop-set, .gantt-row").forEach((el) => ro.observe(el));
+    return () => ro.disconnect();
+  }, [scrollRef, loopEnabled]);
+
+  return loopSegmentHeightRef;
+}
+
+/** Seamless vertical loop: wrap at measured segment height (not scrollHeight / 2). */
+function useSeamlessVerticalScroll(
+  viewportRef,
+  enabled,
+  roundDurationSec,
+  { loopSegmentHeightRef, intervalMs = SEAMLESS_SCROLL_TICK_MS } = {},
+) {
+  const scrollRemainderRef = useRef(0);
+  const prevEnabledRef = useRef(false);
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (enabled && !prevEnabledRef.current) {
+      scrollRemainderRef.current = 0;
+      if (viewport) {
+        viewport.scrollTop = 0;
+      }
+    }
+    if (!enabled) {
+      scrollRemainderRef.current = 0;
+    }
+    prevEnabledRef.current = enabled;
+  }, [enabled, viewportRef]);
+
+  useEffect(() => {
+    if (!enabled) {
+      return undefined;
+    }
+
+    const loopRoundSec = Math.min(
+      SEAMLESS_SCROLL_ROUND_MAX_SEC,
+      Math.max(SEAMLESS_SCROLL_ROUND_MIN_SEC, Number(roundDurationSec) || SEAMLESS_SCROLL_ROUND_MIN_SEC),
+    );
+
+    const timerId = window.setInterval(() => {
+      const viewport = viewportRef.current;
+      if (!viewport) {
+        return;
+      }
+
+      const measuredLoopHeight = loopSegmentHeightRef?.current ?? 0;
+      const loopHeight =
+        measuredLoopHeight > 8
+          ? measuredLoopHeight
+          : loopSegmentHeightRef
+            ? 0
+            : viewport.scrollHeight / 2;
+      if (loopHeight <= 8) {
+        return;
+      }
+
+      const ticksPerRound = (loopRoundSec * 1000) / intervalMs;
+      const step = loopHeight / ticksPerRound;
+      scrollRemainderRef.current += step;
+
+      if (scrollRemainderRef.current < 1) {
+        return;
+      }
+
+      const delta = Math.floor(scrollRemainderRef.current);
+      scrollRemainderRef.current -= delta;
+
+      let baseScrollTop = viewport.scrollTop;
+      if (baseScrollTop >= loopHeight) {
+        baseScrollTop %= loopHeight;
+      }
+
+      let nextScrollTop = baseScrollTop + delta;
+      while (nextScrollTop >= loopHeight) {
+        nextScrollTop -= loopHeight;
+      }
+      viewport.scrollTop = nextScrollTop;
+    }, intervalMs);
+
+    return () => window.clearInterval(timerId);
+  }, [viewportRef, enabled, roundDurationSec, intervalMs, loopSegmentHeightRef]);
+}
+
+function buildSeamlessLoopSignature(items, pickKey = (item) => item?.lineCode ?? item?.lineName ?? "") {
+  if (!items?.length) {
+    return "";
+  }
+  return items.map((item) => String(pickKey(item) ?? "")).join("\u0001");
+}
+
+const LINE_LOOP_KEY = (item) => item?.lineCode ?? item?.lineName ?? "";
+
+/** Detect vertical overflow, then duplicate items for seamless looping. */
+function useSeamlessLoopContent(sourceItems, scrollRef, pickKey = LINE_LOOP_KEY) {
+  const [loopEnabled, setLoopEnabled] = useState(false);
+  const contentSignature = useMemo(
+    () => buildSeamlessLoopSignature(sourceItems, pickKey),
+    [sourceItems, pickKey],
+  );
+
+  useEffect(() => {
+    setLoopEnabled(false);
+    const el = scrollRef.current;
+    if (el) {
+      el.scrollTop = 0;
+    }
+  }, [contentSignature, scrollRef]);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || sourceItems.length === 0) {
+      setLoopEnabled(false);
+      return undefined;
+    }
+
+    const measure = () => {
+      if (el.clientHeight <= 0) {
+        return;
+      }
+      setLoopEnabled(el.scrollHeight - el.clientHeight > 8);
+    };
+
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [contentSignature, sourceItems.length, scrollRef]);
+
+  const loopItems = useMemo(
+    () => (loopEnabled ? [...sourceItems, ...sourceItems] : sourceItems),
+    [sourceItems, loopEnabled],
+  );
+
+  return { loopEnabled, loopItems };
+}
+
+function useFixedRowHeight(containerRef, enabled, visibleRows = 5) {
+  const [rowHeight, setRowHeight] = useState(null);
+
+  useEffect(() => {
+    if (!enabled) {
+      setRowHeight(null);
+      return undefined;
+    }
+
+    const el = containerRef.current;
+    if (!el) {
+      return undefined;
+    }
+
+    const measure = () => {
+      const height = el.clientHeight;
+      if (height > 0) {
+        setRowHeight(Math.max(24, height / visibleRows));
+      }
+    };
+
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [containerRef, enabled, visibleRows]);
+
+  return rowHeight;
 }
 
 /** When `active`, observes container size and auto-scrolls only if content overflows (vertical marquee). */
@@ -596,22 +898,29 @@ function ScreenHeader({
           </div>
           <div className="screen-brand-copy">
             <p className="screen-tag">HOTA MDS</p>
-            <h1>{screen.title || "和泰智造数屏系统"}</h1>
+            <h1>{screen.title || "和泰智能制造数据看板"}</h1>
             <p className="screen-subtitle">{subtitle}</p>
           </div>
         </div>
 
         <div className="screen-toolbar">
           <div className="screen-toolbar-meta">
-            <strong>{welcome.companyName || "和泰智造"}</strong>
+            <strong>{welcome.companyName || "和泰链运机械智能制造有限公司"}</strong>
             <span>{formatDateTime(currentTime.toISOString())}</span>
-            <span className="screen-toolbar-hint">双击画面或点击按钮进入全屏</span>
+            {/* screen-action-button screen-toolbar-layout-reserved：作用为隐藏该内容 */}
+            <span aria-hidden="true" className="screen-toolbar-hint screen-toolbar-layout-reserved">
+              双击画面或点击按钮进入全屏
+            </span>
           </div>
-          {canFullscreen ? (
-            <button className="screen-action-button" onClick={onToggleFullscreen} type="button">
-              {isFullscreen ? "退出全屏" : "进入全屏"}
-            </button>
-          ) : null}
+          <button
+            aria-hidden="true"
+            className="screen-action-button screen-toolbar-layout-reserved"
+            disabled
+            tabIndex={-1}
+            type="button"
+          >
+            进入全屏
+          </button>
         </div>
       </div>
 
@@ -888,6 +1197,7 @@ function LeftScreen({ payload, errorMessage, fullscreenState, screenRef }) {
       <DeviceRealtimeSection
         key="deviceRealtimeMonitor"
         drm={drm}
+        rotationIntervalSeconds={screen.rotationIntervalSeconds}
         alarmPulseDismissed={alarmPulseDismissed}
         setAlarmPulseDismissed={setAlarmPulseDismissed}
       />
@@ -962,7 +1272,7 @@ function LeftScreen({ payload, errorMessage, fullscreenState, screenRef }) {
   );
 }
 
-function DeviceRealtimeSection({ drm, alarmPulseDismissed, setAlarmPulseDismissed }) {
+function DeviceRealtimeSection({ drm, rotationIntervalSeconds, alarmPulseDismissed, setAlarmPulseDismissed }) {
   if (drm.realtimeLayout === "xiaozhou_line") {
     return (
       <XiaozhouLineRealtimeBoard
@@ -986,33 +1296,126 @@ function DeviceRealtimeSection({ drm, alarmPulseDismissed, setAlarmPulseDismisse
   }
 
   return (
-    <section className="screen-panel panel-span-12 panel-unbounded industrial-realtime-panel" key="deviceRealtimeMonitor">
-      <div className="industrial-realtime-grid">
-        {(drm.cards ?? []).map((card) => {
-          const pulseOn = Boolean(card.machineStatus?.alarmActive) && !alarmPulseDismissed.has(card.sourceCode);
-          return (
-            <RealtimeDeviceCard
-              key={card.sourceCode}
-              card={card}
-              pulseOn={pulseOn}
-              formatDateTime={formatDateTime}
-              onDismissAlarm={() => {
-                if (card.machineStatus?.alarmActive) {
-                  setAlarmPulseDismissed((prev) => new Set(prev).add(card.sourceCode));
-                }
-              }}
-            />
-          );
-        })}
-        {(drm.cards ?? []).length === 0 ? (
-          <SectionEmpty title="当前暂无可监控 OPC UA 设备" description="请在数据源配置中绑定设备并配置节点列表（含 TK.MD 数据点）。" />
-        ) : null}
-      </div>
-    </section>
+    <DeviceRealtimePagedGrid
+      alarmPulseDismissed={alarmPulseDismissed}
+      cards={drm.cards ?? []}
+      formatDateTime={formatDateTime}
+      rotationIntervalSeconds={rotationIntervalSeconds}
+      setAlarmPulseDismissed={setAlarmPulseDismissed}
+    />
   );
 }
 
-function GanttBoard({ lineSchedules, schedule }) {
+function GanttLineRow({ line, windowDates, windowStart, windowDays, barSlotHeight, barTopOffset, rowBottomPadding }) {
+  const visibleOrders = (line.orders ?? [])
+    .filter((order) => !isScheduleOrderExcludedAsUpstreamCompleted(order))
+    .map((order) => {
+      const layout = getGanttBarLayout(order, windowStart, windowDays);
+      return layout ? { order, layout } : null;
+    })
+    .filter(Boolean)
+    .sort(compareGanttOrders);
+  const laneCount = visibleOrders.length <= 1 ? 1 : 2;
+  const rowHeight = laneCount * barSlotHeight + barTopOffset + rowBottomPadding;
+
+  return (
+    <article className="gantt-row">
+      <div className="gantt-line-meta">
+        <strong>{line.lineName}</strong>
+        <span>{line.areaName || "演示区域"}</span>
+      </div>
+      <div className="gantt-track-shell">
+        <div className="gantt-track" style={{ "--gantt-window-days": windowDays, minHeight: `${rowHeight}px` }}>
+          <div className="gantt-grid">
+            {windowDates.map((date) => (
+              <span className="gantt-grid-cell" key={date.toISOString()} />
+            ))}
+          </div>
+
+          {visibleOrders.length > 0 ? (
+            visibleOrders.map(({ order, layout }, orderIndex) => {
+              const display = order.display ?? {};
+              const density = getGanttBarDensity(layout);
+              const viz = getGanttScheduleVisual(order);
+              const barClassName = ["gantt-bar", `gantt-bar--${density}`, `gantt-bar--viz-${viz.variant}`, ganttBarRiskClass(viz.risk)]
+                .filter(Boolean)
+                .join(" ");
+              const completionLabel = ganttCompletionLabel(display, order);
+              const lane = orderIndex % 2;
+              const topPx = barTopOffset + lane * barSlotHeight;
+
+              return (
+                <div
+                  className={barClassName}
+                  key={`${line.lineCode}-${order.orderCode}-${orderIndex}`}
+                  style={{
+                    left: `${layout.leftPercent}%`,
+                    top: `${topPx}px`,
+                    width: `${layout.widthPercent}%`,
+                  }}
+                >
+                  <div className="gantt-bar-paint-stack" aria-hidden="true">
+                    {viz.variant === "blue_full" ? <span className="gantt-bar-paint gantt-bar-paint--blue" /> : null}
+                    {viz.variant === "red_full" ? <span className="gantt-bar-paint gantt-bar-paint--red" /> : null}
+                    {viz.variant === "green_full" ? <span className="gantt-bar-paint gantt-bar-paint--green" /> : null}
+                    {viz.variant === "paused" ? <span className="gantt-bar-paint gantt-bar-paint--paused" /> : null}
+                    {viz.variant === "split" ? (
+                      <>
+                        <span
+                          className={
+                            viz.overdueIncomplete
+                              ? "gantt-bar-paint gantt-bar-paint--red gantt-bar-paint--base"
+                              : "gantt-bar-paint gantt-bar-paint--blue gantt-bar-paint--base"
+                          }
+                        />
+                        <span
+                          className={
+                            viz.overdueIncomplete
+                              ? "gantt-bar-paint gantt-bar-paint--yellow gantt-bar-paint--progress gantt-bar-paint--progress-cover"
+                              : "gantt-bar-paint gantt-bar-paint--green gantt-bar-paint--progress"
+                          }
+                          style={{ width: viz.completedPct <= 0 ? 0 : `${viz.completedPct}%` }}
+                        />
+                      </>
+                    ) : null}
+                  </div>
+                  <div className={`gantt-bar-content gantt-bar-content--${density}`}>
+                    <span className="gantt-bar-completion-corner">{completionLabel}</span>
+                    {density === "tiny" ? (
+                      <div className="gantt-bar-mini">
+                        <strong>{order.orderCode}</strong>
+                      </div>
+                    ) : density === "compact" ? (
+                      <div className="gantt-bar-compact">
+                        <strong>{order.orderCode}</strong>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="gantt-bar-head">
+                          <strong className="gantt-bar-order-no">{order.orderCode}</strong>
+                        </div>
+                        <div className="gantt-bar-body gantt-bar-body--material">
+                          <span className="gantt-bar-material-line">{formatGanttMaterialLine(order)}</span>
+                        </div>
+                        <div className="gantt-bar-foot">
+                          <span className="gantt-bar-date-range">{formatGanttDateRange(order, display)}</span>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+              );
+            })
+          ) : (
+            <div className="gantt-empty-row">当前产线在时间跨度内无可见订单</div>
+          )}
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function GanttBoard({ lineSchedules, schedule, rotationIntervalSeconds }) {
   const barSlotHeight = 98;
   const barTopOffset = 10;
   const rowBottomPadding = 18;
@@ -1025,8 +1428,29 @@ function GanttBoard({ lineSchedules, schedule }) {
   const windowStart = windowDates[0] ? startOfDay(windowDates[0]) : startOfDay(new Date());
   const scrollRef = useRef(null);
   const rowsActive = lineSchedules.length > 0;
-  /* 甘特产线列表超量滚动：步长 1px，间隔 60ms（原 40ms 的 2/3 速度） */
-  useOverflowAutoScroll(scrollRef, rowsActive, 60);
+  const { loopEnabled } = useSeamlessLoopContent(lineSchedules, scrollRef);
+  const loopSegmentHeightRef = useSeamlessLoopSetSegmentHeight(scrollRef, loopEnabled);
+  const scrollRoundDurationSec = useMemo(
+    () => computeSeamlessScrollRoundDurationSec(rotationIntervalSeconds),
+    [rotationIntervalSeconds],
+  );
+  useSeamlessVerticalScroll(scrollRef, loopEnabled && rowsActive, scrollRoundDurationSec, {
+    loopSegmentHeightRef,
+  });
+
+  const lineRowProps = {
+    barSlotHeight,
+    barTopOffset,
+    rowBottomPadding,
+    windowDates,
+    windowDays,
+    windowStart,
+  };
+
+  const renderLineRows = (keyPrefix) =>
+    lineSchedules.map((line) => (
+      <GanttLineRow key={`${line.lineCode}-${keyPrefix}`} line={line} {...lineRowProps} />
+    ));
 
   return (
     <div className="gantt-shell">
@@ -1042,117 +1466,18 @@ function GanttBoard({ lineSchedules, schedule }) {
           </div>
         </div>
 
-        <div className="gantt-rows" ref={scrollRef}>
+        <div className={`gantt-rows${loopEnabled ? " gantt-rows--loop" : ""}`} ref={scrollRef}>
           {lineSchedules.length > 0 ? (
-            lineSchedules.map((line) => {
-              const visibleOrders = (line.orders ?? [])
-                .filter((order) => !isScheduleOrderExcludedAsUpstreamCompleted(order))
-                .map((order) => {
-                  const layout = getGanttBarLayout(order, windowStart, windowDays);
-                  return layout ? { order, layout } : null;
-                })
-                .filter(Boolean)
-                .sort(compareGanttOrders);
-              /* 两条纵向轨道交替：按时间排序后第 1、3、5… 在上轨，第 2、4、6… 在下轨，限制每条产线最多两行高度 */
-              const laneCount = visibleOrders.length <= 1 ? 1 : 2;
-              const rowHeight = laneCount * barSlotHeight + barTopOffset + rowBottomPadding;
-
-              return (
-                <article className="gantt-row" key={line.lineCode}>
-                  <div className="gantt-line-meta">
-                    <strong>{line.lineName}</strong>
-                    <span>{line.areaName || "演示区域"}</span>
-                  </div>
-                  <div className="gantt-track-shell">
-                    <div className="gantt-track" style={{ "--gantt-window-days": windowDays, minHeight: `${rowHeight}px` }}>
-                      <div className="gantt-grid">
-                        {windowDates.map((date) => (
-                          <span className="gantt-grid-cell" key={date.toISOString()} />
-                        ))}
-                      </div>
-
-                        {visibleOrders.length > 0 ? (
-                          visibleOrders.map(({ order, layout }, orderIndex) => {
-                            const display = order.display ?? {};
-                            const density = getGanttBarDensity(layout);
-                            const viz = getGanttScheduleVisual(order);
-                            const barClassName = ["gantt-bar", `gantt-bar--${density}`, `gantt-bar--viz-${viz.variant}`, ganttBarRiskClass(viz.risk)]
-                              .filter(Boolean)
-                              .join(" ");
-                            const completionLabel = ganttCompletionLabel(display, order);
-                            const lane = orderIndex % 2;
-                            const topPx = barTopOffset + lane * barSlotHeight;
-
-                            return (
-                              <div
-                                className={barClassName}
-                                key={`${line.lineCode}-${order.orderCode}-${orderIndex}`}
-                                style={{
-                                  left: `${layout.leftPercent}%`,
-                                  top: `${topPx}px`,
-                                  width: `${layout.widthPercent}%`,
-                                }}
-                              >
-                                <div className="gantt-bar-paint-stack" aria-hidden="true">
-                                  {viz.variant === "blue_full" ? <span className="gantt-bar-paint gantt-bar-paint--blue" /> : null}
-                                  {viz.variant === "red_full" ? <span className="gantt-bar-paint gantt-bar-paint--red" /> : null}
-                                  {viz.variant === "green_full" ? <span className="gantt-bar-paint gantt-bar-paint--green" /> : null}
-                                  {viz.variant === "paused" ? <span className="gantt-bar-paint gantt-bar-paint--paused" /> : null}
-                                  {viz.variant === "split" ? (
-                                    <>
-                                      <span
-                                        className={
-                                          viz.overdueIncomplete
-                                            ? "gantt-bar-paint gantt-bar-paint--red gantt-bar-paint--base"
-                                            : "gantt-bar-paint gantt-bar-paint--blue gantt-bar-paint--base"
-                                        }
-                                      />
-                                      <span
-                                        className={
-                                          viz.overdueIncomplete
-                                            ? "gantt-bar-paint gantt-bar-paint--yellow gantt-bar-paint--progress gantt-bar-paint--progress-cover"
-                                            : "gantt-bar-paint gantt-bar-paint--green gantt-bar-paint--progress"
-                                        }
-                                        style={{ width: viz.completedPct <= 0 ? 0 : `${viz.completedPct}%` }}
-                                      />
-                                    </>
-                                  ) : null}
-                                </div>
-                                <div className={`gantt-bar-content gantt-bar-content--${density}`}>
-                                  <span className="gantt-bar-completion-corner">{completionLabel}</span>
-                                  {density === "tiny" ? (
-                                    <div className="gantt-bar-mini">
-                                      <strong>{order.orderCode}</strong>
-                                    </div>
-                                  ) : density === "compact" ? (
-                                    <div className="gantt-bar-compact">
-                                      <strong>{order.orderCode}</strong>
-                                    </div>
-                                  ) : (
-                                    <>
-                                      <div className="gantt-bar-head">
-                                        <strong className="gantt-bar-order-no">{order.orderCode}</strong>
-                                      </div>
-                                      <div className="gantt-bar-body gantt-bar-body--material">
-                                        <span className="gantt-bar-material-line">{formatGanttMaterialLine(order)}</span>
-                                      </div>
-                                      <div className="gantt-bar-foot">
-                                        <span className="gantt-bar-date-range">{formatGanttDateRange(order, display)}</span>
-                                      </div>
-                                    </>
-                                  )}
-                                </div>
-                              </div>
-                            );
-                          })
-                      ) : (
-                        <div className="gantt-empty-row">当前产线在时间跨度内无可见订单</div>
-                      )}
-                    </div>
-                  </div>
-                </article>
-              );
-            })
+            loopEnabled ? (
+              <>
+                <div className="seamless-loop-set">{renderLineRows("a")}</div>
+                <div aria-hidden="true" className="seamless-loop-set">
+                  {renderLineRows("b")}
+                </div>
+              </>
+            ) : (
+              renderLineRows("solo")
+            )
           ) : (
             <div className="gantt-empty-state">当前没有可展示的未完工订单排产数据。</div>
           )}
@@ -1210,9 +1535,47 @@ function aggregateScheduleOverview(lineSchedules) {
   return { totalTarget, totalProduced, completionPct, materials, orderCount };
 }
 
-function ScheduleOverviewSide({ areaName, riskItems, lineSchedules }) {
+function ScheduleOverviewSide({ areaName, riskItems, lineSchedules, rotationIntervalSeconds }) {
   const stats = useMemo(() => aggregateScheduleOverview(lineSchedules), [lineSchedules]);
-  const topMaterials = useMemo(() => stats.materials.slice(0, 8), [stats.materials]);
+  const materials = stats.materials;
+  const materialScrollActive = materials.length > 5;
+  const materialSignature = useMemo(
+    () =>
+      buildSeamlessLoopSignature(
+        materials,
+        (item) => `${item.materialCode ?? ""}\u0000${item.materialName ?? ""}`,
+      ),
+    [materials],
+  );
+  const materialViewportRef = useRef(null);
+  const materialListRef = useRef(null);
+  const loopMaterials = useMemo(
+    () => (materialScrollActive ? [...materials, ...materials] : materials),
+    [materialScrollActive, materials],
+  );
+  const materialRowHeight = useFixedRowHeight(materialViewportRef, materialScrollActive, 5);
+  const loopSegmentHeightRef = useSeamlessLoopSegmentHeight(
+    materialListRef,
+    materialScrollActive,
+    materials.length,
+  );
+  const scrollRoundDurationSec = useMemo(
+    () => computeSeamlessScrollRoundDurationSec(rotationIntervalSeconds),
+    [rotationIntervalSeconds],
+  );
+  useSeamlessVerticalScroll(materialViewportRef, materialScrollActive, scrollRoundDurationSec, {
+    loopSegmentHeightRef,
+  });
+
+  useEffect(() => {
+    if (materialViewportRef.current) {
+      materialViewportRef.current.scrollTop = 0;
+    }
+  }, [materialSignature]);
+
+  const materialRowStyle = materialRowHeight
+    ? { height: materialRowHeight, minHeight: materialRowHeight, maxHeight: materialRowHeight }
+    : undefined;
 
   return (
     <section className="screen-panel panel-span-4 placeholder-panel schedule-overview-side-panel">
@@ -1257,13 +1620,40 @@ function ScheduleOverviewSide({ areaName, riskItems, lineSchedules }) {
           )}
         </div>
 
-        <div className="schedule-overview-section">
+        <div className="schedule-overview-section schedule-overview-section--materials">
           <h3 className="schedule-overview-section-title">工单产成品统计</h3>
-          {topMaterials.length === 0 ? (
+          {materials.length === 0 ? (
             <p className="schedule-overview-empty">暂无物料维度数据。</p>
+          ) : materialScrollActive ? (
+            <div
+              className="schedule-overview-material-viewport schedule-overview-material-viewport--scrollable"
+              ref={materialViewportRef}
+            >
+              <ul
+                className="schedule-overview-material-list schedule-overview-material-list--scrollable"
+                ref={materialListRef}
+              >
+                {loopMaterials.map((m, index) => (
+                  <li
+                    key={`${m.materialCode}-${m.materialName}-${index}`}
+                    style={materialRowStyle}
+                  >
+                    <span
+                      className="schedule-overview-material-line"
+                      title={`${m.materialCode} ${m.materialName}`.trim()}
+                    >
+                      {formatGanttMaterialLine({ materialCode: m.materialCode, materialName: m.materialName })}
+                    </span>
+                    <span className="schedule-overview-material-qty">
+                      {formatNumber(m.producedQuantity)} / {formatNumber(m.targetQuantity)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
           ) : (
             <ul className="schedule-overview-material-list">
-              {topMaterials.map((m, index) => (
+              {materials.map((m, index) => (
                 <li key={`${m.materialCode}-${m.materialName}-${index}`}>
                   <span
                     className="schedule-overview-material-line"
@@ -1333,6 +1723,7 @@ function RightScreen({ payload, errorMessage, fullscreenState, screenRef }) {
       <DeviceRealtimeSection
         key="deviceRealtimeMonitor"
         drm={drm}
+        rotationIntervalSeconds={screen.rotationIntervalSeconds}
         alarmPulseDismissed={alarmPulseDismissed}
         setAlarmPulseDismissed={setAlarmPulseDismissed}
       />
@@ -1345,12 +1736,21 @@ function RightScreen({ payload, errorMessage, fullscreenState, screenRef }) {
             {schedule?.display?.windowDaysLabel || `时间跨度${Math.max(Number(schedule?.windowDays) || 30, 1)}天`}
           </span>
         </div>
-        <GanttBoard lineSchedules={scheduleRows} schedule={schedule} />
+        <GanttBoard
+          lineSchedules={scheduleRows}
+          rotationIntervalSeconds={screen.rotationIntervalSeconds}
+          schedule={schedule}
+        />
       </section>
     ),
     simulationPlaceholder:
       activePageKey === "schedule" ? (
-        <ScheduleOverviewSide areaName={meta.areaName} riskItems={riskItems} lineSchedules={scheduleRows} />
+        <ScheduleOverviewSide
+          areaName={meta.areaName}
+          lineSchedules={scheduleRows}
+          riskItems={riskItems}
+          rotationIntervalSeconds={screen.rotationIntervalSeconds}
+        />
       ) : (
         <section className="screen-panel panel-span-4 placeholder-panel simulation-panel" key="simulationPlaceholder">
           <div className="panel-header">
@@ -1468,7 +1868,7 @@ function ScreenFallback({ areaCode, screenKey, errorMessage }) {
 }
 
 const DEFAULT_SCREEN_POLL_SEC = 30;
-const REALTIME_POLL_FLOOR_SEC = 2;
+const REALTIME_POLL_FLOOR_SEC = 5;
 
 function resolveScreenPollSeconds(screenKey, payload) {
   const pageKeys = payload?.screen?.pageKeys ?? [];
