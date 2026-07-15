@@ -1,3 +1,4 @@
+import dualSpindleArt from "../../assets/devices/dual-spindle-machining-center.png";
 import { formatRpm, RealtimeRobotColumn, RealtimeSpindleColumn, SpindleLoadRing } from "./shared.jsx";
 
 function RealtimeCardShell({
@@ -82,28 +83,44 @@ function formatPct(value) {
 
 export function SiemensBoringRealtimeCard({ card, pulseOn, onDismissAlarm, formatDateTime }) {
   const spindles = Array.isArray(card.spindles) ? card.spindles : [];
+  const slot = spindles[0] ?? { label: "主轴", configured: false };
   const job = card.job ?? {};
+  const ms = card.machineStatus ?? {};
+  const indicator = ms.indicator ?? "gray";
   const mergeLayout = Boolean(card.mergeLayout && card.robot);
   const cncOffline = mergeLayout ? card.cncSourceStatus !== "online" : card.status !== "online";
   const robotOffline = mergeLayout ? card.robotSourceStatus !== "online" : true;
+  const spinning = !cncOffline && slot.configured && Number(slot.actSpeedRpm) > 0;
 
   return (
     <RealtimeCardShell card={card} pulseOn={pulseOn} onDismissAlarm={onDismissAlarm}>
-      {mergeLayout ? (
-        <div className="cnc-machine-split">
-          <div className="cnc-machine-split-col">
-            <RealtimeSpindleColumn deviceOffline={cncOffline} slot={spindles[0] ?? { label: "主轴", configured: false }} />
-          </div>
-          <div className="cnc-machine-split-vrule" aria-hidden="true" />
-          <div className="cnc-machine-split-col">
-            <RealtimeRobotColumn deviceOffline={robotOffline} robot={card.robot} />
-          </div>
+      <div
+        className={`cnc-device-body cnc-device-body--stack cnc-device-body--${indicator} ${
+          cncOffline ? "cnc-device-body--offline" : ""
+        } ${ms.alarmActive ? "cnc-device-body--alarm" : ""}`}
+      >
+        <div className="cnc-device-art-band" aria-hidden="true">
+          <div className="cnc-device-art-glow" />
+          <img src={dualSpindleArt} alt="" draggable={false} />
+          {spinning ? <span className="cnc-device-art-spin" /> : null}
+          <span className="cnc-device-art-status-bar" />
         </div>
-      ) : (
-        <div className="cnc-spindle-row">
-          <RealtimeSpindleColumn deviceOffline={card.status !== "online"} slot={spindles[0] ?? { label: "主轴", configured: false }} />
-        </div>
-      )}
+        {mergeLayout ? (
+          <div className="cnc-machine-split">
+            <div className="cnc-machine-split-col">
+              <RealtimeSpindleColumn deviceOffline={cncOffline} slot={slot} />
+            </div>
+            <div className="cnc-machine-split-vrule" aria-hidden="true" />
+            <div className="cnc-machine-split-col">
+              <RealtimeRobotColumn deviceOffline={robotOffline} robot={card.robot} />
+            </div>
+          </div>
+        ) : (
+          <div className="cnc-spindle-row">
+            <RealtimeSpindleColumn deviceOffline={card.status !== "online"} slot={slot} />
+          </div>
+        )}
+      </div>
       <RealtimeJobFooter job={job} formatDateTime={formatDateTime} updatedAt={card.updatedAt} />
     </RealtimeCardShell>
   );
